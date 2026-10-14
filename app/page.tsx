@@ -63,14 +63,14 @@ export default function Home() {
       return;
     }
   
-    const varietyMapping = {
+    const varietyMapping: Record<number, string> = {
       1: "אטינגר",
       2: "גליל",
       3: "הס",
       4: "פוארטה",
     };
   
-    const plotMapping = {
+    const plotMapping: Record<number, string> = {
       1: "כביש 70",
       2: "חלקה א",
       3: "בית העלמין",
@@ -109,14 +109,14 @@ export default function Home() {
       return;
     }
 
-    const varietyMapping = {
+    const varietyMapping: Record<string, number> = {
       אטינגר: 1,
       גליל: 2,
       הס: 3,
       פוארטה: 4,
     };
 
-    const plotMapping = {
+    const plotMapping: Record<string, number> = {
       "כביש 70": 1,
       "חלקה א": 2,
       "בית העלמין": 3,
