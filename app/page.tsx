@@ -57,6 +57,9 @@ export default function Home() {
       .select("*")
       .order("harvest_date", { ascending: false, nullsFirst: false })
       .order("id", { ascending: false });
+
+    console.log("RAW DATA", data);
+    console.log("LOAD ERROR", error);
   
     if (error) {
       console.error("Error loading shipments:", error);
