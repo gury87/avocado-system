@@ -66,24 +66,55 @@ export default function Home() {
     }
   };
 
-  const addShipment = () => {
-    const newShipment: Shipment = {
-      ...form,
-      id: crypto.randomUUID(),
+  const addShipment = async () => {
+    const varietyMapping = {
+      אטינגר: 1,
+      גליל: 2,
+      הס: 3,
+      פוארטה: 4,
     };
 
-    const updated = [newShipment, ...shipments];
+    const plotMapping = {
+      "כביש 70": 1,
+      "חלקה א": 2,
+      "בית העלמין": 3,
+    };
 
-    setShipments(updated);
+    const newShipment = {
+      harvest_date: form.date,
+      trader_id: 1,
+      variety_id: varietyMapping[form.variety],
+      plot_id: plotMapping[form.plot],
+      picker_id: 1,
+      containers: form.containers,
+      container_size: form.size,
+      picking_cost:
+        form.size === "קטן"
+          ? form.containers * 130
+          : form.containers * 150,
+      status: "pending",
+    };
 
-    setForm({
-      date: today,
-      variety: "אטינגר",
-      plot: "בית העלמין",
-      containers: 1,
-      size: "קטן",
-      picker: "נביל",
-    });
+    const { error } = await supabase
+      .from("harvest_events")
+      .insert(newShipment);
+
+    if (error) {
+      console.error("Error saving shipment:", error);
+      alert("שגיאה בשמירת השיווק");
+    } else {
+      alert("השיווק נשמר בהצלחה");
+
+      // Clear form
+      setForm({
+        date: today,
+        variety: "אטינגר",
+        plot: "בית העלמין",
+        containers: 1,
+        size: "קטן",
+        picker: "נביל",
+      });
+    }
   };
 
   const deleteShipment = (id: string) => {
