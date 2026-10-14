@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { supabase } from "./lib/supabase";
 
 const today = new Date().toISOString().split("T")[0];
 
@@ -44,6 +45,22 @@ export default function Home() {
       JSON.stringify(shipments)
     );
   }, [shipments]);
+
+  const testSupabaseConnection = async () => {
+    const { data, error } = await supabase
+      .from("harvest_events")
+      .select("*")
+      .limit(5);
+
+    console.log("DATA:", data);
+    console.log("ERROR:", error);
+
+    if (error) {
+      alert("שגיאה בחיבור ל-Supabase");
+    } else {
+      alert("החיבור ל-Supabase תקין!");
+    }
+  };
 
   const addShipment = () => {
     const newShipment: Shipment = {
@@ -92,9 +109,16 @@ export default function Home() {
       className="min-h-screen bg-zinc-100"
     >
       <div className="max-w-md mx-auto px-4 py-6 pb-24">
-        <h1 className="text-3xl font-bold text-zinc-900 mb-6">
+        <h1 className="text-3xl font-bold text-zinc-900 mb-4">
           🥑 מערכת שיווק אבוקדו
         </h1>
+
+        <button
+          onClick={testSupabaseConnection}
+          className="mb-4 w-full bg-green-700 text-white rounded-xl py-3"
+        >
+          בדיקת חיבור ל‑Supabase
+        </button>
 
         <div className="flex gap-2 mb-5">
           <button
@@ -127,7 +151,6 @@ export default function Home() {
                 <div className="text-sm text-zinc-500">
                   סה״כ מיכלים
                 </div>
-
                 <div className="text-3xl font-bold text-zinc-900">
                   {totalContainers}
                 </div>
@@ -137,7 +160,6 @@ export default function Home() {
                 <div className="text-sm text-zinc-500">
                   מספר שיווקים
                 </div>
-
                 <div className="text-3xl font-bold text-zinc-900">
                   {shipments.length}
                 </div>
@@ -147,7 +169,6 @@ export default function Home() {
                 <div className="text-sm text-zinc-500">
                   עלות קטיף
                 </div>
-
                 <div className="text-2xl font-bold text-zinc-900">
                   ₪{totalPickingCost}
                 </div>
@@ -157,41 +178,9 @@ export default function Home() {
                 <div className="text-sm text-zinc-500">
                   קוטף ראשי
                 </div>
-
                 <div className="text-xl font-bold text-zinc-900">
                   נביל
                 </div>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-2xl border border-zinc-200 p-4">
-              <h2 className="text-lg font-semibold text-zinc-900 mb-3">
-                שיווקים אחרונים
-              </h2>
-
-              <div className="space-y-2">
-                {shipments.slice(0, 5).map((shipment) => (
-                  <div
-                    key={shipment.id}
-                    className="border border-zinc-200 rounded-xl p-3"
-                  >
-                    <div className="font-semibold text-zinc-900">
-                      {shipment.variety}
-                    </div>
-
-                    <div className="text-zinc-700">
-                      {shipment.plot}
-                    </div>
-
-                    <div className="text-zinc-700">
-                      {shipment.containers} מיכלים
-                    </div>
-
-                    <div className="text-zinc-900 text-sm mt-1">
-                      {shipment.date}
-                    </div>
-                  </div>
-                ))}
               </div>
             </div>
           </>
@@ -281,62 +270,6 @@ export default function Home() {
                 >
                   שמור שיווק
                 </button>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-2xl border border-zinc-200 p-4">
-              <div className="flex justify-between mb-4">
-                <h2 className="font-semibold text-zinc-900">
-                  כל השיווקים
-                </h2>
-
-                <button
-                  onClick={() => {
-                    localStorage.removeItem("shipments");
-                    setShipments([]);
-                  }}
-                  className="text-red-600 text-sm"
-                >
-                  נקה הכל
-                </button>
-              </div>
-
-              <div className="space-y-3">
-                {shipments.map((shipment) => (
-                  <div
-                    key={shipment.id}
-                    className="border border-zinc-200 rounded-xl p-3"
-                  >
-                    <div className="font-semibold text-zinc-900">
-                      {shipment.variety}
-                    </div>
-
-                    <div className="text-zinc-700">
-                      {shipment.plot}
-                    </div>
-
-                    <div className="text-zinc-700">
-                      {shipment.containers} מיכלים
-                    </div>
-
-                    <div className="text-zinc-700">
-                      גודל: {shipment.size}
-                    </div>
-
-                    <div className="text-zinc-900 text-sm mt-2 mb-3">
-                      {shipment.date}
-                    </div>
-
-                    <button
-                      onClick={() =>
-                        deleteShipment(shipment.id)
-                      }
-                      className="text-red-600 text-sm"
-                    >
-                      מחק שיווק
-                    </button>
-                  </div>
-                ))}
               </div>
             </div>
           </>
