@@ -47,18 +47,22 @@ export default function Home() {
   }, [shipments]);
 
   const testSupabaseConnection = async () => {
-    const { data, error } = await supabase
-      .from("harvest_events")
-      .select("*")
-      .limit(5);
-
-    console.log("DATA:", data);
-    console.log("ERROR:", error);
-
+    const { error } = await supabase.from("harvest_events").insert({
+      harvest_date: today,
+      trader_id: 1,
+      variety_id: 1,
+      plot_id: 3,
+      picker_id: 1,
+      containers: 1,
+      container_size: "קטן",
+      picking_cost: 130,
+      status: "test",
+    });
+  
     if (error) {
-      alert("שגיאה בחיבור ל-Supabase");
+      alert(JSON.stringify(error, null, 2));
     } else {
-      alert("החיבור ל-Supabase תקין!");
+      alert("Test row inserted successfully");
     }
   };
 
