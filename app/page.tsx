@@ -17,10 +17,29 @@ type Shipment = {
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<
-    "dashboard" | "shipments"
+    "dashboard" | "shipments" | "shipment-list"
   >("shipments");
 
   const [shipments, setShipments] = useState<Shipment[]>([]);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [shipmentLimit, setShipmentLimit] = useState("5");
+  const [varietyFilter, setVarietyFilter] = useState("");
+  const [plotFilter, setPlotFilter] = useState("");
+  const varietyOptions = [...new Set(shipments.map((shipment) => shipment.variety))]
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, "he"));
+  const plotOptions = [...new Set(shipments.map((shipment) => shipment.plot))]
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, "he"));
+  const filteredShipments = shipments.filter(
+    (shipment) =>
+      (!varietyFilter || shipment.variety === varietyFilter) &&
+      (!plotFilter || shipment.plot === plotFilter)
+  );
+  const visibleShipments =
+    shipmentLimit === "all"
+      ? filteredShipments
+      : filteredShipments.slice(0, Number(shipmentLimit));
 
   const [form, setForm] = useState({
     date: today,
@@ -31,42 +50,65 @@ export default function Home() {
     picker: "נביל",
   });
 
-  useEffect(() => {
-    const saved = localStorage.getItem("shipments");
-
-    if (saved) {
-      setShipments(JSON.parse(saved));
-    }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem(
-      "shipments",
-      JSON.stringify(shipments)
-    );
-  }, [shipments]);
-
-  const testSupabaseConnection = async () => {
-    const { error } = await supabase.from("harvest_events").insert({
-      harvest_date: today,
-      trader_id: 1,
-      variety_id: 1,
-      plot_id: 3,
-      picker_id: 1,
-      containers: 1,
-      container_size: "קטן",
-      picking_cost: 130,
-      status: "test",
-    });
+  // Reusable function to load shipments from Supabase
+  const loadShipments = async () => {
+    const { data, error } = await supabase
+      .from("harvest_events")
+      .select("*")
+      .order("harvest_date", { ascending: false, nullsFirst: false })
+      .order("id", { ascending: false });
   
     if (error) {
-      alert(JSON.stringify(error, null, 2));
-    } else {
-      alert("Test row inserted successfully");
+      console.error("Error loading shipments:", error);
+      return;
     }
+  
+    const varietyMapping = {
+      1: "אטינגר",
+      2: "גליל",
+      3: "הס",
+      4: "פוארטה",
+    };
+  
+    const plotMapping = {
+      1: "כביש 70",
+      2: "חלקה א",
+      3: "בית העלמין",
+    };
+  
+    const mappedShipments = data.map((record) => ({
+      id: record.id,
+      date: record.harvest_date,
+      variety: varietyMapping[record.variety_id] || "",
+      plot: plotMapping[record.plot_id] || "",
+      containers: record.containers,
+      size: record.container_size, // Use the value directly from Supabase
+      picker: "נביל", // Assuming picker is static for now
+    }));
+  
+    setShipments(mappedShipments);
   };
 
+  // Load shipments on page load
+  useEffect(() => {
+    loadShipments();
+  }, []);
+
   const addShipment = async () => {
+    const pickingCost = form.containers * (form.size === "קטן" ? 130 : 150);
+    const confirmationMessage = [
+      "האם לשמור את השיווק הבא?",
+      "",
+      `תאריך: ${form.date.split("-").reverse().join("/")}`,
+      `זן: ${form.variety}`,
+      `חלקה: ${form.plot}`,
+      `מספר מיכלים: ${form.containers}`,
+    ].join("\n");
+
+    if (!window.confirm(confirmationMessage)) {
+      return;
+    }
+
     const varietyMapping = {
       אטינגר: 1,
       גליל: 2,
@@ -88,10 +130,7 @@ export default function Home() {
       picker_id: 1,
       containers: form.containers,
       container_size: form.size,
-      picking_cost:
-        form.size === "קטן"
-          ? form.containers * 130
-          : form.containers * 150,
+      picking_cost: pickingCost,
       status: "pending",
     };
 
@@ -105,6 +144,9 @@ export default function Home() {
     } else {
       alert("השיווק נשמר בהצלחה");
 
+      // Reload shipments after successful insert
+      loadShipments();
+
       // Clear form
       setForm({
         date: today,
@@ -117,12 +159,41 @@ export default function Home() {
     }
   };
 
-  const deleteShipment = (id: string) => {
-    const updated = shipments.filter(
-      (shipment) => shipment.id !== id
-    );
+  const deleteShipment = async (shipment: Shipment) => {
+    if (deletingId !== null) return;
 
-    setShipments(updated);
+    const confirmationMessage = [
+      "האם למחוק את השיווק?",
+      "",
+      `תאריך: ${shipment.date.split("-").reverse().join("/")}`,
+      `זן: ${shipment.variety}`,
+      `חלקה: ${shipment.plot}`,
+      `מספר מיכלים: ${shipment.containers}`,
+    ].join("\n");
+
+    if (!window.confirm(confirmationMessage)) return;
+
+    setDeletingId(shipment.id);
+    try {
+      const { data, error } = await supabase
+        .from("harvest_events")
+        .delete()
+        .eq("id", shipment.id)
+        .select("id");
+
+      if (error || !data?.some((record) => record.id === shipment.id)) {
+        console.error("Error deleting shipment:", error);
+        alert("השיווק לא נמחק. נסה שוב או בדוק את הרשאות המחיקה.");
+        return;
+      }
+
+      setShipments((current) => current.filter((record) => record.id !== shipment.id));
+    } catch (error) {
+      console.error("Error deleting shipment:", error);
+      alert("שגיאה במחיקת השיווק. נסה שוב.");
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const totalContainers = shipments.reduce(
@@ -148,14 +219,7 @@ export default function Home() {
           🥑 מערכת שיווק אבוקדו
         </h1>
 
-        <button
-          onClick={testSupabaseConnection}
-          className="mb-4 w-full bg-green-700 text-white rounded-xl py-3"
-        >
-          בדיקת חיבור ל‑Supabase
-        </button>
-
-        <div className="flex gap-2 mb-5">
+        <div className="flex gap-2 mb-5 text-sm">
           <button
             onClick={() => setActiveTab("shipments")}
             className={`flex-1 rounded-xl p-3 ${
@@ -165,6 +229,17 @@ export default function Home() {
             }`}
           >
             שיווקים
+          </button>
+
+          <button
+            onClick={() => setActiveTab("shipment-list")}
+            className={`flex-1 rounded-xl p-3 ${
+              activeTab === "shipment-list"
+                ? "bg-zinc-900 text-white"
+                : "bg-white text-zinc-700"
+            }`}
+          >
+            רשימת שיווקים
           </button>
 
           <button
@@ -219,6 +294,57 @@ export default function Home() {
               </div>
             </div>
           </>
+        )}
+
+        {activeTab === "shipment-list" && (
+          <section className="bg-white rounded-2xl border border-zinc-200 overflow-hidden">
+            <h2 className="p-4 text-lg font-semibold text-zinc-900">רשימת שיווקים</h2>
+            <div className="overflow-x-auto">
+              <table className="w-full text-right text-xs text-zinc-700">
+                <caption className="sr-only">כל השיווקים לפי תאריך, מהחדש לישן</caption>
+                <thead className="bg-zinc-50 text-zinc-900">
+                  <tr>
+                    <th scope="col" className="px-2 py-2">תאריך</th>
+                    <th scope="col" className="px-2 py-2">זן</th>
+                    <th scope="col" className="px-2 py-2">חלקה</th>
+                    <th scope="col" className="px-2 py-2">מיכלים</th>
+                    <th scope="col" className="px-2 py-2">גודל</th>
+                    <th scope="col" className="px-1 py-2"><span className="sr-only">מחיקה</span></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-100">
+                  {shipments.map((shipment) => (
+                    <tr key={shipment.id}>
+                      <td className="whitespace-nowrap px-2 py-2">
+                        <span dir="ltr">{shipment.date.split("-").reverse().join("/")}</span>
+                      </td>
+                      <td className="px-2 py-2">{shipment.variety}</td>
+                      <td className="px-2 py-2">{shipment.plot}</td>
+                      <td className="px-2 py-2">{shipment.containers}</td>
+                      <td className="px-2 py-2">{shipment.size}</td>
+                      <td className="px-1 py-2">
+                        <button
+                          type="button"
+                          onClick={() => deleteShipment(shipment)}
+                          disabled={deletingId !== null}
+                          aria-label={`מחק שיווק ${shipment.variety} מחלקת ${shipment.plot} בתאריך ${shipment.date.split("-").reverse().join("/")}`}
+                          className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-red-600 hover:bg-red-50 disabled:opacity-40"
+                        >
+                          <span aria-hidden="true" className="text-sm font-bold">✕</span>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {shipments.length === 0 && (
+                    <tr><td colSpan={6} className="p-4 text-center text-zinc-500">אין שיווקים להצגה</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <p aria-live="polite" className="border-t border-zinc-200 px-4 py-3 text-xs text-zinc-500">
+              {deletingId !== null ? "מוחק שיווק…" : `סה״כ ${shipments.length} שיווקים`}
+            </p>
+          </section>
         )}
 
         {activeTab === "shipments" && (
@@ -307,6 +433,94 @@ export default function Home() {
                 </button>
               </div>
             </div>
+
+            <section className="bg-white rounded-2xl border border-zinc-200 overflow-hidden">
+              <div className="flex flex-wrap items-center justify-between gap-3 p-4">
+                <h2 className="text-lg font-semibold text-zinc-900">
+                  שיווקים אחרונים
+                </h2>
+                <div className="flex items-center gap-2 text-sm text-zinc-700">
+                  <label htmlFor="shipment-limit">הצג</label>
+                  <select
+                    id="shipment-limit"
+                    value={shipmentLimit}
+                    onChange={(e) => setShipmentLimit(e.target.value)}
+                    className="rounded-lg border border-zinc-300 bg-white p-2 text-zinc-900"
+                  >
+                    <option value="5">5</option>
+                    <option value="10">10</option>
+                    <option value="20">20</option>
+                    <option value="50">50</option>
+                    <option value="all">הכל</option>
+                  </select>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-right text-xs text-zinc-700">
+                  <caption className="sr-only">רשימת השיווקים האחרונים</caption>
+                  <thead className="bg-zinc-50 text-zinc-900">
+                    <tr>
+                      <th scope="col" className="px-3 py-2">תאריך</th>
+                      <th scope="col" className="px-3 py-2">
+                        <label htmlFor="variety-filter" className="block mb-1">זן</label>
+                        <select
+                          id="variety-filter"
+                          value={varietyFilter}
+                          onChange={(e) => setVarietyFilter(e.target.value)}
+                          className="w-full rounded-md border border-zinc-300 bg-white p-1 font-normal"
+                        >
+                          <option value="">כל הזנים</option>
+                          {varietyOptions.map((variety) => (
+                            <option key={variety} value={variety}>{variety}</option>
+                          ))}
+                        </select>
+                      </th>
+                      <th scope="col" className="px-3 py-2">
+                        <label htmlFor="plot-filter" className="block mb-1">חלקה</label>
+                        <select
+                          id="plot-filter"
+                          value={plotFilter}
+                          onChange={(e) => setPlotFilter(e.target.value)}
+                          className="w-full rounded-md border border-zinc-300 bg-white p-1 font-normal"
+                        >
+                          <option value="">כל החלקות</option>
+                          {plotOptions.map((plot) => (
+                            <option key={plot} value={plot}>{plot}</option>
+                          ))}
+                        </select>
+                      </th>
+                      <th scope="col" className="px-3 py-2">מיכלים</th>
+                      <th scope="col" className="px-3 py-2">גודל</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-100">
+                    {visibleShipments.map((shipment) => (
+                      <tr key={shipment.id}>
+                        <td className="whitespace-nowrap px-3 py-3">
+                          <span dir="ltr">
+                            {shipment.date.split("-").reverse().join("/")}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3">{shipment.variety}</td>
+                        <td className="px-3 py-3">{shipment.plot}</td>
+                        <td className="px-3 py-3">{shipment.containers}</td>
+                        <td className="px-3 py-3">{shipment.size}</td>
+                      </tr>
+                    ))}
+                    {visibleShipments.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="p-4 text-center text-zinc-500">
+                          אין שיווקים להצגה
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <p className="border-t border-zinc-200 px-4 py-3 text-xs text-zinc-500">
+                מוצגים {visibleShipments.length} מתוך {filteredShipments.length} שיווקים
+              </p>
+            </section>
           </>
         )}
       </div>
