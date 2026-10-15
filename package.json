@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test:auth": "node --test tests/auth-permissions.test.mjs",
     "test:reports": "node --experimental-strip-types --test tests/reports.test.mjs",
+    "test:photos": "node --experimental-strip-types --test tests/photos.test.mjs",
     "test:receipts": "node --experimental-strip-types --test tests/receipts.test.mjs",
     "test:shipments": "node --experimental-strip-types --test tests/shipments.test.mjs tests/receipts.test.mjs"
   },

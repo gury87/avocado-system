@@ -76,6 +76,7 @@ try {
   const requests = [];
   let documents = [];
   const storedFiles = new Set();
+  let photoFixture = "";
   handlers.set("Fetch.requestPaused", [(event) => {
     void (async () => {
       const url = new URL(event.request.url);
@@ -111,6 +112,13 @@ try {
         } else {
           body = documents.filter((d) => ["receipt_id", "shipment_id", "storage_path"].every((key) => !url.searchParams.has(key) || d[key] === url.searchParams.get(key).replace("eq.", "")));
         }
+      } else if (url.pathname.startsWith("/storage/v1/object/sign/")) {
+        assert.equal(role, "admin");
+        if (event.request.method === "GET") {
+          await page("Fetch.fulfillRequest", { requestId: event.requestId, responseCode: 200, responseHeaders: [{ name: "Content-Type", value: "image/png" }, { name: "Access-Control-Allow-Origin", value: origin }], body: photoFixture });
+          return;
+        }
+        body = { signedURL: "/object/sign/farm-documents/preview.jpg?token=fixture" };
       } else if (url.pathname.startsWith("/storage/v1/object/farm-documents/")) {
         assert.equal(role, "admin");
         const path = decodeURIComponent(url.pathname.split("/farm-documents/")[1]);
@@ -234,17 +242,58 @@ try {
   await fill("תאריך שיווק", "2026-09-05"); await fill("חלקה", "2");
   await click("מסמכים מצורפים");
   await waitText("אין מסמכים מצורפים");
-  const pdfPath = join(temp, "test-receipt.pdf");
-  await writeFile(pdfPath, "%PDF-1.4\n%test fixture\n%%EOF");
+  const photoPath = join(temp, "test-receipt.png");
+  photoFixture = await evaluate("(() => {const c=document.createElement('canvas');c.width=600;c.height=400;const x=c.getContext('2d');x.fillStyle='red';x.fillRect(0,0,300,400);x.fillStyle='blue';x.fillRect(300,0,300,400);return c.toDataURL('image/png').split(',')[1]})()");
+  await writeFile(photoPath, Buffer.from(photoFixture, "base64"));
+  await evaluate("(() => { const append=FormData.prototype.append;FormData.prototype.append=function(key,value,...rest){if(value instanceof Blob && value.type.startsWith('image/')){void createImageBitmap(value).then(bitmap=>{const c=document.createElement('canvas');c.width=bitmap.width;c.height=bitmap.height;const x=c.getContext('2d');x.drawImage(bitmap,0,0);window.__photoUpload={width:bitmap.width,height:bitmap.height,type:value.type,pixel:[...x.getImageData(Math.floor(c.width/2),Math.floor(c.height/2),1,1).data]};bitmap.close()})};return append.call(this,key,value,...rest)}})()");
   const upload = async () => {
+    await evaluate("window.__photoUpload=null");
     const { root: dom } = await page("DOM.getDocument");
     const { nodeId } = await page("DOM.querySelector", { nodeId: dom.nodeId, selector: 'input[type="file"]' });
-    await page("DOM.setFileInputFiles", { nodeId, files: [pdfPath] });
-    await waitText("test-receipt.pdf");
+    await page("DOM.setFileInputFiles", { nodeId, files: [photoPath] });
+    await waitText("עריכת תמונה לפני העלאה");
+    await waitFor(() => evaluate("!!document.querySelector('[data-photo-crop] img')"), "photo decoded");
+    await click("סיבוב 90°");
+    const handle = await evaluate("(() => {const r=document.querySelector('[data-handle=se]').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()");
+    await page("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: handle.x, y: handle.y }] });
+    await page("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: handle.x - 30, y: handle.y - 40 }] });
+    await page("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    assert.ok(await evaluate("parseFloat(document.querySelector('[data-crop-box]').style.width)<100"), "Crop corner responds to touch");
+    await fill("רוחב", "50"); await fill("גובה", "50");
+    await screenshot("photo-editor-mobile-320.png");
+    await click("שמירה והעלאה");
+    await waitText("test-receipt.jpg");
+    const image = await waitFor(() => evaluate("window.__photoUpload"), "edited image uploaded");
+    assert.equal(image.width, 200); assert.equal(image.height, 300); assert.equal(image.type, "image/jpeg");
+    assert.ok(image.pixel[0] > 240 && image.pixel[2] < 15, "Uploaded pixels come from the rotated/cropped red quadrant");
   };
+  const { root: photoDom } = await page("DOM.getDocument");
+  const { nodeId: photoInput } = await page("DOM.querySelector", { nodeId: photoDom.nodeId, selector: 'input[type="file"]' });
+  await page("DOM.setFileInputFiles", { nodeId: photoInput, files: [photoPath] });
+  await waitText("עריכת תמונה לפני העלאה");
+  await evaluate("document.querySelector('dialog[aria-label=\"עריכת תמונה לפני העלאה\"] button[aria-label=\"סגור תמונה\"]').click()");
+  assert.equal(storedFiles.size, 0); assert.equal(documents.length, 0);
   await upload();
   assert.equal(documents[0].shipment_id, "1");
   assert.equal(storedFiles.size, 1);
+  await waitFor(() => evaluate("!!document.querySelector('img[alt=\"test-receipt.jpg\"]')?.complete"), "thumbnail loaded");
+  await evaluate("document.querySelector('button[aria-label=\"הגדל תמונה test-receipt.jpg\"]').click()");
+  await waitFor(() => evaluate("!!document.querySelector('[data-photo-viewer] img')?.complete"), "large private image loaded");
+  await evaluate("document.querySelector('button[aria-label=\"הגדל תמונה\"]').click()");
+  assert.equal(await evaluate("document.querySelector('output[aria-label=\"רמת הגדלה\"]').textContent"), "150%");
+  await screenshot("photo-viewer-mobile-320.png");
+  await click("התאם למסך");
+  const area = await evaluate("(() => {const r=document.querySelector('[data-photo-viewer]').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()");
+  await page("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: area.x - 30, y: area.y }, { x: area.x + 30, y: area.y }] });
+  await page("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: area.x - 75, y: area.y }, { x: area.x + 75, y: area.y }] });
+  await page("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  assert.ok(await evaluate("parseInt(document.querySelector('output[aria-label=\"רמת הגדלה\"]').textContent)>200"), "Pinch zoom works");
+  await page("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: area.x, y: area.y }] });
+  await page("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: area.x + 40, y: area.y }] });
+  await page("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  assert.ok(await evaluate("!document.querySelector('[data-photo-viewer] img').style.transform.startsWith('translate(0px')"), "Zoomed image can be dragged");
+  await evaluate("document.querySelector('dialog[aria-label=\"test-receipt.jpg\"] button[aria-label=\"סגור תמונה\"]').click()");
+  assert.ok(await evaluate("!!document.querySelector('dialog[aria-labelledby=\"shipment-edit-title\"][open]')"), "Closing photo keeps shipment editor open");
   await screenshot("shipment-edit-mobile-320.png");
   await page("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await screenshot("shipment-edit-mobile-390.png");
