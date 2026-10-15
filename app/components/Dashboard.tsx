@@ -27,6 +27,12 @@ export default function Dashboard({ shipments, paidWeights, weightsError }: { sh
   const paidKg = filtered.reduce((sum, shipment) => sum + (weightById.get(shipment.id)?.net_weight || 0), 0);
   const paidContainers = filtered.reduce((sum, shipment) => sum + (weightById.get(shipment.id)?.containers || 0), 0);
   const weightAvailable = paidWeights !== null && !weightsError;
+  const unpaidByVariety = new Map<string, number>();
+  for (const shipment of filtered) {
+    const remaining = Math.max(0, shipment.containers - (weightById.get(shipment.id)?.containers || 0));
+    unpaidByVariety.set(shipment.variety, (unpaidByVariety.get(shipment.variety) || 0) + remaining);
+  }
+  const unpaidTotal = [...unpaidByVariety.values()].reduce((sum, count) => sum + count, 0);
   const partialWeight = paidContainers + 0.0005 < total;
   const kgLabel = (value: number) => value.toLocaleString("he-IL", { maximumFractionDigits: 3 });
   const groups = new Map<string, { plot: string; variety: string; containers: number; kg: number; paidContainers: number }>();
@@ -81,7 +87,7 @@ export default function Dashboard({ shipments, paidWeights, weightsError }: { sh
           className="mt-3 min-h-11 rounded-lg border border-zinc-300 px-3 text-sm">נקה סינון</button>
       </div>
 
-      <div className="grid grid-cols-2 gap-3" aria-live="polite">
+      <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 lg:grid-cols-3" aria-live="polite">
         <div className="rounded-2xl border border-zinc-200 bg-white p-4">
           <h2 className="text-sm text-zinc-500">סה״כ מיכלים</h2>
           <p className="mt-2 break-words text-3xl font-bold">{invalidRange ? "—" : total.toLocaleString("he-IL")}</p>
@@ -93,6 +99,23 @@ export default function Dashboard({ shipments, paidWeights, weightsError }: { sh
             ? <><p className="mt-2 break-words text-3xl font-bold">{kgLabel(paidKg)}</p><p className="mt-1 text-xs text-zinc-500">{partialWeight ? "נתון חלקי · " : ""}{kgLabel(paidContainers)} מתוך {kgLabel(total)} מיכלים שולמו</p></>
             : <p className="mt-2 text-sm text-zinc-600">{weightsError ? "לא ניתן לטעון את נתוני המשקל" : invalidRange ? "יש לתקן את טווח התאריכים" : !weightAvailable ? "טוען נתוני משקל…" : "נתוני משקל טרם זמינים"}</p>}
         </div>
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+          <h2 className="text-sm text-amber-900">מיכלים שטרם שולמו</h2>
+          <p data-unpaid-total className="mt-2 break-words text-3xl font-bold">{weightAvailable && !invalidRange ? kgLabel(unpaidTotal) : "—"}</p>
+          <p className="mt-1 text-xs text-zinc-600">{weightsError ? "לא ניתן לטעון נתוני תשלום" : !weightAvailable ? "טוען נתוני תשלום…" : invalidRange ? "יש לתקן את טווח התאריכים" : "לפי הסינון הנוכחי · לאחר הפחתת שיוכים מאושרים"}</p>
+        </div>
+      </div>
+
+      <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white">
+        <h2 className="p-4 text-lg font-semibold">מיכלים שטרם שולמו לפי זן</h2>
+        {weightAvailable && !invalidRange ? <table data-unpaid-varieties className="w-full table-fixed text-right text-sm">
+          <thead className="bg-zinc-50"><tr><th scope="col" className="px-4 py-3">זן</th><th scope="col" className="px-4 py-3">מיכלים שטרם שולמו</th></tr></thead>
+          <tbody className="divide-y divide-zinc-100">
+            {[...unpaidByVariety].sort(([a], [b]) => a.localeCompare(b, "he")).map(([variety, count]) => <tr key={variety}><td className="px-4 py-3">{variety || "לא ידוע"}</td><td className="px-4 py-3">{kgLabel(count)}</td></tr>)}
+            {!unpaidByVariety.size && <tr><td colSpan={2} className="p-4 text-zinc-500">אין שיווקים התואמים לסינון</td></tr>}
+          </tbody>
+          <tfoot className="border-t border-zinc-200 font-semibold"><tr><th scope="row" className="px-4 py-3">סה״כ</th><td className="px-4 py-3">{kgLabel(unpaidTotal)}</td></tr></tfoot>
+        </table> : <p className="px-4 pb-4 text-sm text-zinc-600">{weightsError ? "לא ניתן לטעון נתוני תשלום" : invalidRange ? "יש לתקן את טווח התאריכים" : "טוען נתוני תשלום…"}</p>}
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white">

@@ -73,6 +73,7 @@ test("Receipt SQL enforces atomic accounting, permissions and allocation limits"
     await db.exec(await read("supabase/migrations/002_secure_farm.sql"));
     await db.exec(await read("supabase/migrations/003_receipts.sql"));
     await db.exec(await read("supabase/migrations/004_edit_shipments.sql"));
+    await db.exec(await read("supabase/migrations/005_delete_receipts.sql"));
     const asUser = async (user, query, params = [], role = "authenticated") => {
       await db.exec(`begin; set local role ${role};`);
       try {
@@ -202,6 +203,31 @@ test("Receipt SQL enforces atomic accounting, permissions and allocation limits"
       const saved = (await workspace()).receipts.find((item) => item.id === adjusted.id);
       assert.equal(saved.amount, "299.5");
       assert.equal(saved.adjustment_reason, adjusted.adjustment_reason);
+    });
+    await t.test("Only admins delete drafts/cancelled receipts; confirmed and stale records are protected", async () => {
+      const draft = receipt();
+      draft.version = (await save(draft, false)).version;
+      const remove = (item, user = admin, role = "authenticated") => asUser(user,
+        "select delete_farm_receipt($1,$2)", [item.id, item.version], role);
+      const beforeWeights = await weights();
+      for (const user of [worker, viewer]) await assert.rejects(remove(draft, user), /FORBIDDEN/);
+      await assert.rejects(remove(draft, "", "anon"), /permission denied/);
+      await assert.rejects(asUser(admin, "delete from farm_receipts where id=$1", [draft.id]), /permission denied/);
+      await assert.rejects(remove({ ...draft, version: draft.version - 1 }), /STALE_RECEIPT/);
+      const confirmed = (await workspace()).receipts.find((item) => item.status === "confirmed");
+      await assert.rejects(remove(confirmed), /CANNOT_DELETE_CONFIRMED/);
+      for (const item of [draft, (await workspace()).receipts.find((record) => record.id === example.id)]) {
+        const lineId = item.lines[0].id;
+        await remove(item);
+        assert.equal((await asUser(admin, "select * from farm_receipts where id=$1", [item.id])).length, 0);
+        assert.equal((await asUser(admin, "select * from farm_receipt_lines where receipt_id=$1", [item.id])).length, 0);
+        assert.equal((await asUser(admin, "select * from farm_receipt_allocations where line_id=$1", [lineId])).length, 0);
+        const [audit] = await asUser(admin, "select * from audit_log where action='receipt_deleted' and entity_id=$1", [item.id]);
+        assert.equal(audit.actor_id, admin);
+        assert.equal(audit.details.before.lines[0].allocations[0].harvest_event_id, 1);
+        await assert.rejects(remove(item), /STALE_RECEIPT/);
+      }
+      assert.deepEqual(await weights(), beforeWeights, "Deleting unpaid receipts leaves paid totals unchanged");
     });
   } finally { await db.close(); }
 });

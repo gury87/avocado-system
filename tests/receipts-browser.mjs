@@ -104,6 +104,14 @@ try {
         Object.assign(workspace.shipments[0], { harvest_date: request.new_date,
           variety_id: String(request.new_variety_id), plot_id: String(request.new_plot_id), containers: request.new_containers });
         shipmentVersion++; body = { id: "1", edit_version: shipmentVersion };
+      } else if (url.pathname.endsWith("/delete_farm_receipt")) {
+        assert.equal(role, "admin");
+        const request = JSON.parse(event.request.postData);
+        const item = workspace.receipts.find((record) => record.id === request.receipt_id);
+        assert.ok(item && ["draft", "cancelled"].includes(item.status));
+        assert.equal(item.version, request.expected_version);
+        workspace.receipts = workspace.receipts.filter((record) => record.id !== item.id);
+        body = null;
       } else if (url.pathname.endsWith("/save_farm_receipt")) {
         assert.equal(role, "admin");
         const request = JSON.parse(event.request.postData);
@@ -167,12 +175,19 @@ try {
   assert.ok((await text()).includes("פרטי התקבול"), "Unsaved navigation can be cancelled");
   await click("שמור טיוטה"); await waitText("הטיוטה נשמרה");
   assert.equal(writes, 1); assert.equal(paidWeights().length, 0);
+  await click("דשבורד"); await waitText("מיכלים שטרם שולמו לפי זן");
+  assert.equal(await evaluate("document.querySelector('[data-unpaid-total]').textContent"), "2");
+  assert.ok(await evaluate("document.querySelector('[data-unpaid-varieties]').textContent.includes('גליל')"));
+  await fill("מתאריך שיווק", "2026-10-01");
+  assert.equal(await evaluate("document.querySelector('[data-unpaid-total]').textContent"), "0");
+  await click("תקבולים"); await waitText("תקבולים קודמים");
   await fill("מצב", "draft");
   await evaluate("document.querySelectorAll('details').forEach(item=>item.open=true)");
   await click("עריכת תקבול"); await waitText("עריכת תקבול");
   await click("אישור סופי ושמירה"); await waitText("התקבול אושר ונשמר");
   assert.equal(writes, 2); assert.equal(paidWeights()[0].net_weight, 560);
   await click("דשבורד"); await waitText("560"); await screenshot("dashboard-mobile.png");
+  assert.equal(await evaluate("document.querySelector('[data-unpaid-total]').textContent"), "0");
   await page("Emulation.setDeviceMetricsOverride", { width: 320, height: 844, deviceScaleFactor: 1, mobile: true });
   await screenshot("dashboard-mobile-320.png");
 
@@ -199,6 +214,26 @@ try {
   await page("Emulation.setDeviceMetricsOverride", { width: 320, height: 844, deviceScaleFactor: 1, mobile: true });
   await click("שמור שינויים"); await waitFor(() => evaluate("!document.querySelector('dialog[open]')"), "shipment saved");
   await waitText("05/09/2026"); assert.equal(shipmentVersion, 1);
+
+  for (const status of ["draft", "cancelled"]) {
+    const item = structuredClone(workspace.receipts[0]);
+    item.id = crypto.randomUUID(); item.status = status; item.cancellation_reason = "בדיקה";
+    workspace.receipts.push(item);
+    await click("תקבולים"); await waitText("תקבולים קודמים");
+    await click("רענון רשימה");
+    await fill("מצב", status);
+    await waitFor(() => evaluate("!!document.querySelector('details')"), "receipt to delete");
+    await evaluate("document.querySelectorAll('details').forEach(item=>item.open=true)");
+    acceptDialog = false; await click("מחיקת תקבול"); acceptDialog = true;
+    assert.ok(workspace.receipts.some((record) => record.id === item.id), "Cancelled confirmation keeps receipt");
+    await click("מחיקת תקבול"); await waitText("התקבול נמחק");
+    await waitFor(() => evaluate("!document.querySelector('details')"), "deleted receipt removed from list");
+    assert.equal(workspace.receipts.some((record) => record.id === item.id), false);
+    assert.equal(paidWeights()[0].net_weight, 560);
+    await fill("מצב", "confirmed");
+    assert.equal(await evaluate("[...document.querySelectorAll('button')].some(item=>item.textContent==='מחיקת תקבול')"), false);
+    await click("שיווקים");
+  }
 
   role = "worker"; await seedSession(); await page("Page.navigate", { url: origin }); await waitText("עובד");
   await click("שיווקים"); await waitText("רשימת שיווקים"); await evaluate("document.querySelector('button[aria-label^=\"ערוך שיווק\"]').click()");

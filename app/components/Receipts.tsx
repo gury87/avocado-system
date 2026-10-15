@@ -91,6 +91,20 @@ export default function Receipts({ onChanged, onDirtyChange }: { onChanged: () =
     } finally { setBusy(false); }
   };
 
+  const remove = async (item: Receipt) => {
+    if (busy || loading || !["draft", "cancelled"].includes(item.status)) return;
+    if (!window.confirm(`למחוק לצמיתות את התקבול בסטטוס ${statusLabels[item.status]} מ־${dateLabel(item.payment_date)} על סך ${money(cents(item.amount))}?\nהתקבול וכל שורותיו יימחקו מהרשימה. הפעולה אינה ניתנת לביטול.`)) return;
+    setBusy(true); setMessage("");
+    try {
+      const { error } = await supabase.rpc("delete_farm_receipt", { receipt_id: item.id, expected_version: item.version });
+      if (error) throw error;
+      setMessage("התקבול נמחק.");
+      await load(); onChanged();
+    } catch (error) {
+      setMessage(receiptError(error && typeof error === "object" && "message" in error ? String(error.message) : ""));
+    } finally { setBusy(false); }
+  };
+
   if (profile.role !== "admin") return <p role="alert">מסך התקבולים זמין למנהל בלבד.</p>;
   const original = workspace?.receipts.find((item) => item.id === receipt?.id);
   const history = workspace?.receipts.filter((item) => listStatus === "all" || item.status === listStatus) || [];
@@ -176,6 +190,7 @@ export default function Receipts({ onChanged, onDirtyChange }: { onChanged: () =
             <button type="button" disabled={busy || loading} onClick={() => open(item)} className="min-h-11 rounded-lg border border-zinc-300 px-3">עריכת תקבול</button>
             <button type="button" disabled={busy || loading} onClick={() => { void cancel(item); }} className="min-h-11 rounded-lg border border-red-200 px-3 text-red-700">ביטול תקבול</button>
           </div>}
+          {(item.status === "draft" || item.status === "cancelled") && <button type="button" disabled={busy || loading} onClick={() => { void remove(item); }} className="min-h-11 rounded-lg border border-red-200 px-3 text-red-700">מחיקת תקבול</button>}
         </div>
       </details>)}
     </>}
