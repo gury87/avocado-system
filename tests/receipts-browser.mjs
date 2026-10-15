@@ -167,6 +167,7 @@ try {
   assert.ok((await text()).includes("פרטי התקבול"), "Unsaved navigation can be cancelled");
   await click("שמור טיוטה"); await waitText("הטיוטה נשמרה");
   assert.equal(writes, 1); assert.equal(paidWeights().length, 0);
+  await fill("מצב", "draft");
   await evaluate("document.querySelectorAll('details').forEach(item=>item.open=true)");
   await click("עריכת תקבול"); await waitText("עריכת תקבול");
   await click("אישור סופי ושמירה"); await waitText("התקבול אושר ונשמר");

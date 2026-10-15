@@ -21,7 +21,7 @@ export default function Receipts({ onChanged, onDirtyChange }: { onChanged: () =
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
-  const [listStatus, setListStatus] = useState("all");
+  const [listStatus, setListStatus] = useState("confirmed");
   const load = useCallback(async () => {
     setLoading(true);
     try {
