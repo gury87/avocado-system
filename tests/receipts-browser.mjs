@@ -177,6 +177,13 @@ try {
   await screenshot("dashboard-mobile-320.png");
 
   await click("שיווקים"); await waitText("רשימת שיווקים");
+  for (const width of [320, 390]) {
+    await page("Emulation.setDeviceMetricsOverride", { width, height: 844, deviceScaleFactor: 1, mobile: true });
+    const table = await evaluate("(() => { const t=document.querySelector('[data-shipment-list]'); return {width:t.clientWidth,content:t.scrollWidth,available:t.parentElement.clientWidth}; })()");
+    assert.ok(table.content <= table.available + 1, `Shipment table overflows at ${width}px: ${JSON.stringify(table)}`);
+    await screenshot(`shipments-mobile-${width}.png`);
+  }
+  await page("Emulation.setDeviceMetricsOverride", { width: 320, height: 844, deviceScaleFactor: 1, mobile: true });
   await evaluate("document.querySelector('button[aria-label=\"מיון לפי תאריך\"]').click()");
   assert.equal(await evaluate("document.querySelector('button[aria-label=\"מיון לפי תאריך\"]').closest('th').getAttribute('aria-sort')"), "ascending");
   await evaluate("document.querySelector('button[aria-label=\"מיון לפי מיכלים\"]').click()");

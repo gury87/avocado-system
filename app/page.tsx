@@ -361,6 +361,18 @@ function FarmApp() {
               }}
             />}
             <div className="space-y-3 px-4 pb-4 text-sm text-zinc-700">
+              <div className="grid grid-cols-3 gap-2">
+                {listColumns.map(({ key, label }) => <label key={key} className="min-w-0 text-xs">{label}
+                  <select id={`list-${key}`} value={listFilters[key]}
+                    onChange={(e) => setListFilters((current) => ({ ...current, [key]: e.target.value }))}
+                    className="mt-1 min-h-11 w-full min-w-0 rounded-lg border border-zinc-300 bg-white px-1 text-base">
+                    <option value="">הכל</option>
+                    {[...new Set(shipments.map((shipment) => shipment[key]))].filter((value) => value !== "")
+                      .sort((a, b) => key === "containers" ? Number(a) - Number(b) : String(a).localeCompare(String(b), "he"))
+                      .map((value) => <option key={value} value={value}>{value}</option>)}
+                  </select>
+                </label>)}
+              </div>
               <fieldset className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2">
                 <legend className="mb-2 font-medium">טווח תאריכי שיווק</legend>
                 <label className="min-w-0">
@@ -398,8 +410,16 @@ function FarmApp() {
               </button>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-right text-xs text-zinc-700">
+              <table data-shipment-list className="w-full table-fixed text-right text-[11px] text-zinc-700 sm:table-auto sm:text-xs [&_td]:px-1 [&_th]:px-1">
                 <caption className="sr-only">רשימת שיווקים עם סינון ומיון לפי עמודות</caption>
+                <colgroup>
+                  <col style={{ width: canCreate ? "26%" : "30%" }} />
+                  <col style={{ width: canCreate ? "14%" : "18%" }} />
+                  <col style={{ width: canCreate ? "19%" : "26%" }} />
+                  <col style={{ width: canCreate ? "14%" : "18%" }} />
+                  <col style={{ width: "8%" }} />
+                  {canCreate && <col style={{ width: "19%" }} />}
+                </colgroup>
                 <thead className="bg-zinc-50 text-zinc-900">
                   <tr>
                     <th scope="col" aria-sort={listSort.key === "date" ? (listSort.direction === "asc" ? "ascending" : "descending") : "none"} className="px-2 py-2">
@@ -407,24 +427,7 @@ function FarmApp() {
                     </th>
                     {listColumns.map(({ key, label }) => (
                       <th key={key} scope="col" aria-sort={listSort.key === key ? (listSort.direction === "asc" ? "ascending" : "descending") : "none"} className="px-2 py-2">
-                        <button type="button" onClick={() => toggleSort(key)} className="min-h-11 whitespace-nowrap" aria-label={`מיון לפי ${label}`}>{label}<span aria-hidden="true">{sortIndicator(key)}</span></button>
-                        <label htmlFor={`list-${key}`} className="sr-only">סינון לפי {label}</label>
-                        <select
-                          id={`list-${key}`}
-                          value={listFilters[key]}
-                          onChange={(e) => setListFilters((current) => ({ ...current, [key]: e.target.value }))}
-                          className="min-h-11 min-w-20 w-full rounded-lg border border-zinc-300 bg-white p-2 text-base font-normal"
-                        >
-                          <option value="">הכל</option>
-                          {[...new Set(shipments.map((shipment) => shipment[key]))]
-                            .filter((value) => value !== "")
-                            .sort((a, b) => key === "containers"
-                              ? Number(a) - Number(b)
-                              : String(a).localeCompare(String(b), "he"))
-                            .map((value) => (
-                              <option key={value} value={value}>{value}</option>
-                            ))}
-                        </select>
+                        <button type="button" onClick={() => toggleSort(key)} className="min-h-11 max-w-full" aria-label={`מיון לפי ${label}`}>{label}<span aria-hidden="true">{sortIndicator(key)}</span></button>
                       </th>
                     ))}
                     <th scope="col" className="px-1 py-2"><span className="sr-only">שיוך תשלום</span></th>
@@ -438,7 +441,7 @@ function FarmApp() {
                         <span dir="ltr">{shipment.date.split("-").reverse().join("/")}</span>
                       </td>
                       <td className="px-2 py-2">{shipment.variety}</td>
-                      <td className="px-2 py-2">{shipment.plot}</td>
+                      <td className="break-words px-2 py-2">{shipment.plot}</td>
                       <td className="px-2 py-2">{shipment.containers}</td>
                       <td className="px-1 py-2 text-center">
                         {paidShipmentIds.has(shipment.id) && <span title="שויך תשלום מאושר לשיווק (מלא או חלקי)" className="text-lg font-bold text-green-700"><span aria-hidden="true">₪</span><span className="sr-only">שויך תשלום מאושר לשיווק (מלא או חלקי)</span></span>}
