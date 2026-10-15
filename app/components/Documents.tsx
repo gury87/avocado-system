@@ -66,12 +66,14 @@ export default function Documents({ kind, id, onBusyChange }: { kind: "receipt" 
     <h4 className="mb-3 font-semibold" aria-live="polite">{loading ? "טוען מסמכים…" : error ? "מסמכים מצורפים" : files.length ? `מסמכים מצורפים (${files.length})` : "אין מסמכים מצורפים"}</h4>
     <div className="space-y-3">
       <p className="text-xs text-zinc-500">אפשר לצלם או לבחור תמונה, לסובב ולחתוך לפני ההעלאה. התמונות זמינות למנהל בלבד.</p>
-      <label className={`inline-flex min-h-11 cursor-pointer items-center rounded-lg border border-zinc-300 px-3 ${busy || loading ? "opacity-50" : ""}`}>הוספת תמונה<input aria-label="הוספת תמונה" disabled={busy || loading} type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={(event) => {
+      <div className="flex flex-wrap gap-2">
+      {([{ source: "gallery", label: "בחירה מהגלריה" }, { source: "camera", label: "צילום תמונה" }] as const).map(({ source, label }) => <label key={source} className={`inline-flex min-h-11 cursor-pointer items-center rounded-lg border border-zinc-300 px-3 focus-within:ring-2 focus-within:ring-green-700 ${busy || loading ? "opacity-50" : ""}`}>{label}<input aria-label={label} disabled={busy || loading} type="file" accept={source === "camera" ? "image/*" : "image/jpeg,image/png,image/webp"} capture={source === "camera" ? "environment" : undefined} className="sr-only" onChange={(event) => {
         const file = event.target.files?.[0]; event.target.value = "";
         if (!file) return;
         if (!(file.type ? ["image/jpeg", "image/png", "image/webp"].includes(file.type) : /\.(jpe?g|png|webp)$/i.test(file.name)) || !file.size || file.size > 26214400) { setError("יש לבחור תמונת JPEG, PNG או WebP עד 25 מג״ב."); return; }
         working(true); setError(""); setPendingPhoto(file);
-      }} /></label>
+      }} /></label>)}
+      </div>
       {loading && <p role="status">טוען מסמכים…</p>}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
       {files.map((file) => <div key={file.id} className="min-w-0 rounded-xl border border-zinc-200 p-2">

@@ -253,14 +253,16 @@ try {
   assert.equal(shipmentVersion, 0); assert.equal(workspace.shipments[0].trader_id, "1");
   await fill("סוחר", "1");
   await waitText("אין מסמכים מצורפים");
+  assert.equal(await evaluate("document.querySelector('input[aria-label=\"צילום תמונה\"]').getAttribute('capture')"), "environment");
+  assert.equal(await evaluate("document.querySelector('input[aria-label=\"בחירה מהגלריה\"]').hasAttribute('capture')"), false);
   const photoPath = join(temp, "test-receipt.png");
   photoFixture = await evaluate("(() => {const c=document.createElement('canvas');c.width=600;c.height=400;const x=c.getContext('2d');x.fillStyle='red';x.fillRect(0,0,300,400);x.fillStyle='blue';x.fillRect(300,0,300,400);return c.toDataURL('image/png').split(',')[1]})()");
   await writeFile(photoPath, Buffer.from(photoFixture, "base64"));
   await evaluate("(() => { const append=FormData.prototype.append;FormData.prototype.append=function(key,value,...rest){if(value instanceof Blob && value.type.startsWith('image/')){void createImageBitmap(value).then(bitmap=>{const c=document.createElement('canvas');c.width=bitmap.width;c.height=bitmap.height;const x=c.getContext('2d');x.drawImage(bitmap,0,0);window.__photoUpload={width:bitmap.width,height:bitmap.height,type:value.type,pixel:[...x.getImageData(Math.floor(c.width/2),Math.floor(c.height/2),1,1).data]};bitmap.close()})};return append.call(this,key,value,...rest)}})()");
-  const upload = async () => {
+  const upload = async (source = "gallery") => {
     await evaluate("window.__photoUpload=null");
     const { root: dom } = await page("DOM.getDocument");
-    const { nodeId } = await page("DOM.querySelector", { nodeId: dom.nodeId, selector: 'input[type="file"]' });
+    const { nodeId } = await page("DOM.querySelector", { nodeId: dom.nodeId, selector: source === "camera" ? 'input[capture="environment"]' : 'input[type="file"]:not([capture])' });
     await page("DOM.setFileInputFiles", { nodeId, files: [photoPath] });
     await waitText("עריכת תמונה לפני העלאה");
     await waitFor(() => evaluate("!!document.querySelector('[data-photo-crop] img')"), "photo decoded");
@@ -352,7 +354,7 @@ try {
   await click("תקבולים"); await waitText("תקבולים קודמים");
   await evaluate("document.querySelectorAll('details').forEach(item=>item.open=true)");
   await waitText("אין מסמכים מצורפים");
-  await upload();
+  await upload("camera");
   assert.equal(documents.filter((d) => d.receipt_id).length, 1);
   await evaluate("document.querySelector('details').open=false");
   await waitFor(() => evaluate("!document.querySelector('input[type=file]')"), "receipt documents unmounted when closed");
