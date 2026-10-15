@@ -23,6 +23,7 @@ export default function Receipts({ onChanged, onDirtyChange }: { onChanged: () =
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [listStatus, setListStatus] = useState("confirmed");
+  const [openReceiptIds, setOpenReceiptIds] = useState<Set<string>>(() => new Set());
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -169,14 +170,21 @@ export default function Receipts({ onChanged, onDirtyChange }: { onChanged: () =
       </div>
       <button type="button" disabled={busy || loading} onClick={() => { void load(); }} className="min-h-11 underline">רענון רשימה</button>
       {!loading && history.length === 0 && <p className="rounded-xl bg-white p-4 text-sm">אין תקבולים להצגה.</p>}
-      {history.map((item) => <details key={item.id} className="rounded-2xl border border-zinc-200 bg-white">
+      {history.map((item) => <details key={item.id} open={openReceiptIds.has(item.id)} onToggle={(event) => {
+        if (event.target !== event.currentTarget) return;
+        const open = event.currentTarget.open;
+        setOpenReceiptIds((current) => {
+          if (current.has(item.id) === open) return current;
+          const next = new Set(current); if (open) next.add(item.id); else next.delete(item.id); return next;
+        });
+      }} className="rounded-2xl border border-zinc-200 bg-white">
         <summary className="min-h-11 cursor-pointer p-4 text-sm font-semibold">{dateLabel(item.payment_date)} · {money(cents(item.amount))} · {statusLabels[item.status]}</summary>
         <div className="space-y-3 px-4 pb-4 text-sm">
           <p>{workspace.traders.find((trader) => trader.id === item.trader_id)?.name} · {paymentMethods[item.method]}</p>
           {item.received_date && <p>התקבל בתאריך: {dateLabel(item.received_date)}</p>}
           {item.reference && <p className="break-words">אסמכתה: {item.reference}</p>}
           {item.notes && <p className="whitespace-pre-line break-words">{item.notes}</p>}
-          <Documents kind="receipt" id={item.id} onBusyChange={(working) => { setBusy(working); onDirtyChange(working); }} />
+          {openReceiptIds.has(item.id) && <Documents kind="receipt" id={item.id} onBusyChange={(working) => { setBusy(working); onDirtyChange(working); }} />}
           <p>סכום הפירוט: {money(totalLineCents(item))} · הפרש: {money(cents(item.amount) - totalLineCents(item))}</p>
           {item.adjustment_reason && <p className="break-words">הסבר להפרש: {item.adjustment_reason}</p>}
           {item.lines.map((line, index) => <div key={line.id} className="space-y-1 rounded-xl bg-zinc-50 p-3">

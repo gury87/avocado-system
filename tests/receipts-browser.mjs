@@ -252,7 +252,6 @@ try {
   await waitText("לא ניתן לשנות סוחר בשיווק המשויך");
   assert.equal(shipmentVersion, 0); assert.equal(workspace.shipments[0].trader_id, "1");
   await fill("סוחר", "1");
-  await click("מסמכים מצורפים");
   await waitText("אין מסמכים מצורפים");
   const photoPath = join(temp, "test-receipt.png");
   photoFixture = await evaluate("(() => {const c=document.createElement('canvas');c.width=600;c.height=400;const x=c.getContext('2d');x.fillStyle='red';x.fillRect(0,0,300,400);x.fillStyle='blue';x.fillRect(300,0,300,400);return c.toDataURL('image/png').split(',')[1]})()");
@@ -275,6 +274,7 @@ try {
     await screenshot("photo-editor-mobile-320.png");
     await click("שמירה והעלאה");
     await waitFor(() => evaluate("!!document.querySelector('button[aria-label=\"הגדל תמונה test-receipt.jpg\"]')"), "uploaded photo preview");
+    await waitText("מסמכים מצורפים (1)");
     assert.equal((await text()).includes("test-receipt.jpg"), false, "Photo file name is not displayed");
     const image = await waitFor(() => evaluate("window.__photoUpload"), "edited image uploaded");
     assert.equal(image.width, 200); assert.equal(image.height, 300); assert.equal(image.type, "image/jpeg");
@@ -315,6 +315,10 @@ try {
   await page("Emulation.setDeviceMetricsOverride", { width: 320, height: 844, deviceScaleFactor: 1, mobile: true });
   await click("שמור שינויים"); await waitFor(() => evaluate("!document.querySelector('dialog[open]')"), "shipment saved");
   await waitText("05/09/2026"); assert.equal(shipmentVersion, 1);
+  await evaluate("document.querySelector('button[aria-label^=\"ערוך שיווק\"]').click()");
+  await waitText("מסמכים מצורפים (1)");
+  assert.ok(await evaluate("!!document.querySelector('button[aria-label=\"הגדל תמונה test-receipt.jpg\"]')"), "Existing image appears automatically when shipment is reopened");
+  await click("ביטול");
 
   await click("דוחות ומעקב"); await waitText("יתרות פתוחות לפי סוחר");
   await waitFor(() => evaluate("!!document.querySelector('summary')"), "reports loaded");
@@ -347,9 +351,14 @@ try {
   assert.ok((await text()).includes("3 מיכלים"));
   await click("תקבולים"); await waitText("תקבולים קודמים");
   await evaluate("document.querySelectorAll('details').forEach(item=>item.open=true)");
-  await click("מסמכים מצורפים"); await waitText("אין מסמכים מצורפים");
+  await waitText("אין מסמכים מצורפים");
   await upload();
   assert.equal(documents.filter((d) => d.receipt_id).length, 1);
+  await evaluate("document.querySelector('details').open=false");
+  await waitFor(() => evaluate("!document.querySelector('input[type=file]')"), "receipt documents unmounted when closed");
+  await evaluate("document.querySelector('details').open=true");
+  await waitText("מסמכים מצורפים (1)");
+  assert.ok(await evaluate("!!document.querySelector('button[aria-label=\"הגדל תמונה test-receipt.jpg\"]')"), "Receipt preview opens automatically with existing attachments");
   acceptDialog = false; await click("מחיקה"); acceptDialog = true;
   assert.equal(documents.length, 2);
   await click("מחיקה"); await waitText("אין מסמכים מצורפים");
@@ -379,7 +388,9 @@ try {
   role = "worker"; await seedSession(); await page("Page.navigate", { url: origin }); await waitText("עובד");
   assert.equal(await evaluate("[...document.querySelectorAll('button')].some(item=>item.textContent==='דוחות ומעקב')"), false);
   await click("שיווקים"); await waitText("רשימת שיווקים"); await evaluate("document.querySelector('button[aria-label^=\"ערוך שיווק\"]').click()");
-  await fill("מספר מיכלים", "3"); await click("שמור שינויים");
+  await fill("מספר מיכלים", "3");
+  await waitFor(() => evaluate("[...document.querySelectorAll('button')].some(b=>b.textContent==='שמור שינויים'&&!b.disabled)"), "worker edit ready");
+  await click("שמור שינויים");
   await waitFor(() => evaluate("!document.querySelector('dialog[open]')"), "worker edit saved");
   assert.equal(shipmentVersion, 2);
   workspace.receipts.forEach((r) => { r.status = "cancelled"; });

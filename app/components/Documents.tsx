@@ -9,8 +9,8 @@ type Document = { id: string; storage_path: string; file_name: string; file_size
 const isPhoto = (file: Document) => file.mime_type ? file.mime_type.startsWith("image/") : /\.(jpe?g|png|webp)$/i.test(file.storage_path);
 export default function Documents({ kind, id, onBusyChange }: { kind: "receipt" | "shipment"; id: string; onBusyChange?: (busy: boolean) => void }) {
   const { profile } = useAuth();
-  const [expanded, setExpanded] = useState(false), [files, setFiles] = useState<Document[]>([]);
-  const [busy, setBusy] = useState(false), [loading, setLoading] = useState(false), [error, setError] = useState("");
+  const [files, setFiles] = useState<Document[]>([]);
+  const [busy, setBusy] = useState(false), [loading, setLoading] = useState(true), [error, setError] = useState("");
   const [pendingPhoto, setPendingPhoto] = useState<File | null>(null), [viewing, setViewing] = useState<Document | null>(null);
   const column = kind === "receipt" ? "receipt_id" : "shipment_id";
   const load = useCallback(async () => {
@@ -23,10 +23,10 @@ export default function Documents({ kind, id, onBusyChange }: { kind: "receipt" 
     finally { setLoading(false); }
   }, [column, id]);
   useEffect(() => {
-    if (!expanded || profile.role !== "admin") return;
+    if (profile.role !== "admin") return;
     const timer = window.setTimeout(() => { void load(); }, 0);
     return () => window.clearTimeout(timer);
-  }, [expanded, load, profile.role]);
+  }, [load, profile.role]);
   useEffect(() => {
     if (!pendingPhoto) return;
     const guard = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
@@ -63,17 +63,16 @@ export default function Documents({ kind, id, onBusyChange }: { kind: "receipt" 
       return saved;
     }} />}
     {viewing && <PhotoViewer path={viewing.storage_path} name={viewing.file_name} onClose={() => setViewing(null)} />}
-    <button type="button" disabled={busy} aria-expanded={expanded} onClick={() => setExpanded(!expanded)} className="min-h-11 underline">מסמכים מצורפים</button>
-    {expanded && <div className="space-y-3">
+    <h4 className="mb-3 font-semibold" aria-live="polite">{loading ? "טוען מסמכים…" : error ? "מסמכים מצורפים" : files.length ? `מסמכים מצורפים (${files.length})` : "אין מסמכים מצורפים"}</h4>
+    <div className="space-y-3">
       <p className="text-xs text-zinc-500">אפשר לצלם או לבחור תמונה, לסובב ולחתוך לפני ההעלאה. התמונות זמינות למנהל בלבד.</p>
-      <label className="block">הוספת תמונה<input aria-label="הוספת תמונה" disabled={busy || loading} type="file" accept="image/jpeg,image/png,image/webp" className="mt-2 block w-full min-w-0 text-xs" onChange={(event) => {
+      <label className={`inline-flex min-h-11 cursor-pointer items-center rounded-lg border border-zinc-300 px-3 ${busy || loading ? "opacity-50" : ""}`}>הוספת תמונה<input aria-label="הוספת תמונה" disabled={busy || loading} type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={(event) => {
         const file = event.target.files?.[0]; event.target.value = "";
         if (!file) return;
         if (!(file.type ? ["image/jpeg", "image/png", "image/webp"].includes(file.type) : /\.(jpe?g|png|webp)$/i.test(file.name)) || !file.size || file.size > 26214400) { setError("יש לבחור תמונת JPEG, PNG או WebP עד 25 מג״ב."); return; }
         working(true); setError(""); setPendingPhoto(file);
       }} /></label>
       {loading && <p role="status">טוען מסמכים…</p>}
-      {!loading && !files.length && !error && <p>אין מסמכים מצורפים.</p>}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
       {files.map((file) => <div key={file.id} className="min-w-0 rounded-xl border border-zinc-200 p-2">
         {isPhoto(file) && <PhotoThumbnail path={file.storage_path} name={file.file_name} disabled={busy} onOpen={() => setViewing(file)} />}
@@ -99,7 +98,7 @@ export default function Documents({ kind, id, onBusyChange }: { kind: "receipt" 
         }}>מחיקה</button>
       </div>)}
       </div>
-      {error && <p role="alert" className="text-red-700">{error}</p>}
-    </div>}
+      {error && <p role="alert" className="text-red-700">{error} <button type="button" disabled={busy || loading} onClick={() => { void load(); }} className="min-h-11 underline">רענון מסמכים</button></p>}
+    </div>
   </div>;
 }
