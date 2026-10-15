@@ -6,6 +6,8 @@ import Dashboard from "./components/Dashboard";
 import AuthGate, { useAuth } from "./components/AuthGate";
 import Receipts from "./components/Receipts";
 import type { PaidWeight } from "./lib/receipts";
+import ShipmentEditor from "./components/ShipmentEditor";
+import { sortShipments, type ShipmentSort, type ShipmentSortKey } from "./lib/shipments";
 
 const today = new Date().toISOString().split("T")[0];
 
@@ -17,6 +19,9 @@ type Shipment = {
   containers: number;
   size: string;
   picker: string;
+  varietyId: number;
+  plotId: number;
+  editVersion: number;
 };
 
 export default function Home() {
@@ -32,12 +37,19 @@ function FarmApp() {
   >("shipments");
 
   const [shipments, setShipments] = useState<Shipment[]>([]);
+  const [editingShipment, setEditingShipment] = useState<Shipment | null>(null);
+  const [shipmentEditDirty, setShipmentEditDirty] = useState(false);
+  const [listSort, setListSort] = useState<ShipmentSort>({ key: "date", direction: "desc" });
+  const toggleSort = (key: ShipmentSortKey) => setListSort((current) => ({ key, direction: current.key === key && current.direction === "asc" ? "desc" : "asc" }));
+  const sortIndicator = (key: ShipmentSortKey) => listSort.key === key ? (listSort.direction === "asc" ? " ↑" : " ↓") : " ↕";
   const [paidWeights, setPaidWeights] = useState<PaidWeight[] | null>(null);
   const [weightsError, setWeightsError] = useState(false);
   const [receiptsDirty, setReceiptsDirty] = useState(false);
   const selectTab = (tab: typeof activeTab) => {
     if (tab === activeTab) return;
-    if (receiptsDirty && !window.confirm("יש שינויים בתקבול שלא נשמרו. לעזוב אותם?")) return;
+    if ((receiptsDirty || shipmentEditDirty) && !window.confirm("יש שינויים שלא נשמרו. לעזוב אותם?")) return;
+    setEditingShipment(null);
+    setShipmentEditDirty(false);
     setReceiptsDirty(false);
     setUnsavedChanges(false);
     setActiveTab(tab);
@@ -74,14 +86,14 @@ function FarmApp() {
   const invalidDateRange = Boolean(
     listFilters.fromDate && listFilters.toDate && listFilters.fromDate > listFilters.toDate
   );
-  const listShipments = shipments.filter((shipment) =>
+  const listShipments = sortShipments(shipments.filter((shipment) =>
     !invalidDateRange &&
     (!listFilters.variety || shipment.variety === listFilters.variety) &&
     (!listFilters.plot || shipment.plot === listFilters.plot) &&
     (!listFilters.containers || shipment.containers === Number(listFilters.containers)) &&
     (!listFilters.fromDate || shipment.date >= listFilters.fromDate) &&
     (!listFilters.toDate || shipment.date <= listFilters.toDate)
-  );
+  ), listSort);
   const listColumns = [
     { key: "variety", label: "זן" },
     { key: "plot", label: "חלקה" },
@@ -115,7 +127,7 @@ function FarmApp() {
   const loadShipments = useCallback(async () => {
     const records: {
       id: string | number; harvest_date: string; variety_id: number; plot_id: number;
-      containers: number; container_size: string;
+      containers: number; container_size: string; edit_version?: number;
     }[] = [];
     // Fetch all pages so the dashboard is not limited by the REST row cap.
     for (let offset = 0; ; offset += 500) {
@@ -158,6 +170,9 @@ function FarmApp() {
       containers: Number(record.containers),
       size: record.container_size, // Use the value directly from Supabase
       picker: "נביל", // Assuming picker is static for now
+      varietyId: Number(record.variety_id),
+      plotId: Number(record.plot_id),
+      editVersion: record.edit_version ?? 0,
     }));
   
     setShipments(mappedShipments);
@@ -332,6 +347,17 @@ function FarmApp() {
         {activeTab === "shipment-list" && (
           <section className="bg-white rounded-2xl border border-zinc-200 overflow-hidden">
             <h2 className="p-4 text-lg font-semibold text-zinc-900">רשימת שיווקים</h2>
+            <p className="px-4 pb-3 text-xs text-zinc-500">לחץ על כותרת עמודה למיון עולה או יורד.</p>
+            {editingShipment && canCreate && <ShipmentEditor
+              key={editingShipment.id}
+              shipment={editingShipment}
+              onClose={() => { setEditingShipment(null); setShipmentEditDirty(false); setUnsavedChanges(false); }}
+              onDirtyChange={(dirty) => { setShipmentEditDirty(dirty); setUnsavedChanges(dirty); }}
+              onSaved={async (updated) => {
+                setShipments((current) => current.map((item) => item.id === updated.id ? { ...item, ...updated } : item));
+                await Promise.all([loadShipments(), loadPaidWeights()]);
+              }}
+            />}
             <div className="space-y-3 px-4 pb-4 text-sm text-zinc-700">
               <fieldset className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2">
                 <legend className="mb-2 font-medium">טווח תאריכי שיווק</legend>
@@ -371,13 +397,16 @@ function FarmApp() {
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-right text-xs text-zinc-700">
-                <caption className="sr-only">כל השיווקים לפי תאריך, מהחדש לישן</caption>
+                <caption className="sr-only">רשימת שיווקים עם סינון ומיון לפי עמודות</caption>
                 <thead className="bg-zinc-50 text-zinc-900">
                   <tr>
-                    <th scope="col" className="px-2 py-2">תאריך</th>
+                    <th scope="col" aria-sort={listSort.key === "date" ? (listSort.direction === "asc" ? "ascending" : "descending") : "none"} className="px-2 py-2">
+                      <button type="button" onClick={() => toggleSort("date")} className="min-h-11 whitespace-nowrap" aria-label="מיון לפי תאריך">תאריך<span aria-hidden="true">{sortIndicator("date")}</span></button>
+                    </th>
                     {listColumns.map(({ key, label }) => (
-                      <th key={key} scope="col" className="px-2 py-2">
-                        <label htmlFor={`list-${key}`} className="mb-1 block">{label}</label>
+                      <th key={key} scope="col" aria-sort={listSort.key === key ? (listSort.direction === "asc" ? "ascending" : "descending") : "none"} className="px-2 py-2">
+                        <button type="button" onClick={() => toggleSort(key)} className="min-h-11 whitespace-nowrap" aria-label={`מיון לפי ${label}`}>{label}<span aria-hidden="true">{sortIndicator(key)}</span></button>
+                        <label htmlFor={`list-${key}`} className="sr-only">סינון לפי {label}</label>
                         <select
                           id={`list-${key}`}
                           value={listFilters[key]}
@@ -396,7 +425,7 @@ function FarmApp() {
                         </select>
                       </th>
                     ))}
-                    {canDelete && <th scope="col" className="px-1 py-2"><span className="sr-only">מחיקה</span></th>}
+                    {canCreate && <th scope="col" className="px-1 py-2"><span className="sr-only">פעולות</span></th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-100">
@@ -408,8 +437,9 @@ function FarmApp() {
                       <td className="px-2 py-2">{shipment.variety}</td>
                       <td className="px-2 py-2">{shipment.plot}</td>
                       <td className="px-2 py-2">{shipment.containers}</td>
-                      {canDelete && <td className="px-1 py-2">
-                        <button
+                      {canCreate && <td className="px-1 py-2">
+                        <button type="button" disabled={deletingId !== null} onClick={() => setEditingShipment(shipment)} aria-label={`ערוך שיווק מתאריך ${shipment.date.split("-").reverse().join("/")}`} className="min-h-11 min-w-11 rounded-lg px-2 text-sm text-blue-700 disabled:opacity-40">עריכה</button>
+                        {canDelete && <button
                           type="button"
                           onClick={() => deleteShipment(shipment)}
                           disabled={deletingId !== null}
@@ -417,12 +447,12 @@ function FarmApp() {
                           className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-red-600 hover:bg-red-50 disabled:opacity-40"
                         >
                           <span aria-hidden="true" className="text-sm font-bold">✕</span>
-                        </button>
+                        </button>}
                       </td>}
                     </tr>
                   ))}
                   {listShipments.length === 0 && (
-                    <tr><td colSpan={canDelete ? 5 : 4} className="p-4 text-center text-zinc-500">אין שיווקים התואמים לסינון</td></tr>
+                    <tr><td colSpan={canCreate ? 5 : 4} className="p-4 text-center text-zinc-500">אין שיווקים התואמים לסינון</td></tr>
                   )}
                 </tbody>
               </table>

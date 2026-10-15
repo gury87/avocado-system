@@ -56,7 +56,7 @@ test("Receipt SQL enforces atomic accounting, permissions and allocation limits"
       insert into traders values (1, 'ראובן יהודה'), (2, 'סוחר אחר');
       create table public.harvest_events (
         id bigserial primary key, trader_id bigint references traders(id), harvest_date date,
-        variety_id bigint, plot_id bigint, containers numeric, container_size text
+        variety_id bigint, plot_id bigint, containers numeric, container_size text, picking_cost numeric
       );
       insert into harvest_events (trader_id, harvest_date, variety_id, plot_id, containers, container_size) values
         (1, '2026-09-06', 2, 1, 4, 'קטן'), (1, '2026-09-08', 1, 2, 1, 'קטן'),
@@ -72,6 +72,7 @@ test("Receipt SQL enforces atomic accounting, permissions and allocation limits"
     await db.query("update profiles set role = 'viewer', is_active = true where id = $1", [viewer]);
     await db.exec(await read("supabase/migrations/002_secure_farm.sql"));
     await db.exec(await read("supabase/migrations/003_receipts.sql"));
+    await db.exec(await read("supabase/migrations/004_edit_shipments.sql"));
     const asUser = async (user, query, params = [], role = "authenticated") => {
       await db.exec(`begin; set local role ${role};`);
       try {
@@ -84,6 +85,28 @@ test("Receipt SQL enforces atomic accounting, permissions and allocation limits"
       (await asUser(user, "select save_farm_receipt($1::jsonb,$2) as receipt", [JSON.stringify(item), finalize]))[0].receipt;
     const weights = async (user = admin) => await asUser(user, "select * from get_paid_shipment_weights()");
     const workspace = async () => normalizeWorkspace((await asUser(admin, "select get_receipt_workspace() as data"))[0].data);
+    const edit = (user, id, version, date, variety, plot, count) => asUser(user,
+      "select edit_farm_shipment($1,$2,$3::date,$4,$5,$6)", [id, version, date, variety, plot, count]);
+
+    await t.test("Admins and workers edit shipments; viewers and direct updates are denied", async () => {
+      await assert.rejects(edit(viewer, "5", 0, "2026-09-05", 1, 2, 6), /FORBIDDEN/);
+      await assert.rejects(asUser(worker, "update harvest_events set containers=20 where id=5"));
+      await edit(worker, "5", 0, "2026-09-05", 1, 2, 6);
+      const [updated] = await asUser(admin, "select *, harvest_date::text as harvest_date from harvest_events where id=5");
+      assert.equal(updated.harvest_date, "2026-09-05");
+      assert.equal(Number(updated.variety_id), 1);
+      assert.equal(Number(updated.plot_id), 2);
+      assert.equal(Number(updated.containers), 6);
+      assert.equal(Number(updated.picking_cost), 780);
+      assert.equal(updated.container_size, "קטן");
+      assert.equal(updated.edit_version, 1);
+      await assert.rejects(edit(admin, "5", 0, "2026-09-05", 1, 2, 6), /STALE_SHIPMENT/);
+      await assert.rejects(edit(worker, "5", 1, "2026-09-05", 1, 2, 0), /INVALID_SHIPMENT/);
+      const audit = await asUser(admin, "select * from audit_log where action='shipment_updated' and entity_id='5'");
+      assert.equal(audit[0].actor_id, worker);
+      assert.equal(audit[0].details.before.variety_id, 2);
+      assert.equal(audit[0].details.after.variety_id, 1);
+    });
 
     const example = receipt([
       { ...line({ containers: "2", net: "560", price: "1.8", amount: "1008" }), gross_weight: "657" },
@@ -127,6 +150,16 @@ test("Receipt SQL enforces atomic accounting, permissions and allocation limits"
       example.version = updated.version;
       assert.equal((await weights()).reduce((sum,item) => sum + Number(item.net_weight),0), 1339);
       await assert.rejects(save(old), /STALE_RECEIPT/);
+    });
+    await t.test("Shipment edits preserve receipt validity and cannot reduce paid capacity", async () => {
+      await assert.rejects(edit(worker, "1", 0, "2026-09-06", 1, 1, 4), /LINKED_VARIETY/);
+      await assert.rejects(edit(worker, "1", 0, "2026-09-06", 2, 1, 1), /BELOW_PAID_CONTAINERS/);
+      await edit(worker, "1", 0, "2026-09-05", 2, 3, 4);
+      const data = await workspace();
+      assert.equal(data.shipments.find((item) => item.id === "1").harvest_date, "2026-09-05");
+      assert.equal(data.shipments.find((item) => item.id === "1").plot_id, "3");
+      assert.equal(Number((await weights()).find((item) => item.harvest_event_id === "1").net_weight), 560);
+      assert.equal(data.receipts.find((item) => item.id === example.id).lines[0].trader_date, "2026-09-07");
     });
     await t.test("Rows can span shipments and a shipment can span rows and receipts", async () => {
       const shared = receipt([line({ containers: "2", net: "200", allocations: [

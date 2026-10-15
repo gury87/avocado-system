@@ -72,6 +72,7 @@ try {
     return allocations.length ? [{ harvest_event_id: "1", containers: allocations.reduce((sum, item) => sum + Number(item.containers), 0), net_weight: allocations.reduce((sum, item) => sum + Number(item.net_weight), 0) }] : [];
   };
   let writes = 0;
+  let shipmentVersion = 0;
   const requests = [];
   handlers.set("Fetch.requestPaused", [(event) => {
     void (async () => {
@@ -90,12 +91,19 @@ try {
       let body;
       if (url.pathname === "/auth/v1/user") body = user();
       else if (url.pathname === "/rest/v1/profiles") body = profile();
-      else if (url.pathname === "/rest/v1/harvest_events") body = [{ id: 1, harvest_date: "2026-09-06", trader_id: 1, variety_id: 2, plot_id: 1, containers: 2, container_size: "קטן" }];
+      else if (url.pathname === "/rest/v1/harvest_events") body = [{ ...workspace.shipments[0], id: 1, edit_version: shipmentVersion, container_size: "קטן" }];
       else if (url.pathname.endsWith("/get_paid_shipment_weights")) body = paidWeights();
       else if (url.pathname.endsWith("/get_receipt_workspace")) {
         assert.equal(role, "admin");
         workspace.shipments[0].used_containers = paidWeights()[0]?.containers || 0;
         body = workspace;
+      } else if (url.pathname.endsWith("/edit_farm_shipment")) {
+        assert.ok(role === "admin" || role === "worker");
+        const request = JSON.parse(event.request.postData);
+        assert.equal(request.expected_version, shipmentVersion);
+        Object.assign(workspace.shipments[0], { harvest_date: request.new_date,
+          variety_id: String(request.new_variety_id), plot_id: String(request.new_plot_id), containers: request.new_containers });
+        shipmentVersion++; body = { id: "1", edit_version: shipmentVersion };
       } else if (url.pathname.endsWith("/save_farm_receipt")) {
         assert.equal(role, "admin");
         const request = JSON.parse(event.request.postData);
@@ -136,6 +144,8 @@ try {
   const screenshot = async (name) => {
     const dimensions = await evaluate("({viewport:innerWidth,content:document.documentElement.scrollWidth})");
     assert.ok(dimensions.content <= dimensions.viewport + 1, `Horizontal page overflow: ${JSON.stringify(dimensions)}`);
+    const modal = await evaluate("(() => { const dialog=document.querySelector('dialog[open]'); if(!dialog) return null; const rect=dialog.getBoundingClientRect(); return {left:rect.left,right:rect.right,width:document.documentElement.clientWidth}; })()");
+    if (modal) assert.ok(modal.left >= -1 && modal.right <= modal.width + 1, `Dialog outside viewport: ${JSON.stringify(modal)}`);
     const image = await page("Page.captureScreenshot", { format: "png", captureBeyondViewport: true });
     await writeFile(join(temp, name), Buffer.from(image.data, "base64"));
   };
@@ -165,11 +175,37 @@ try {
   await page("Emulation.setDeviceMetricsOverride", { width: 320, height: 844, deviceScaleFactor: 1, mobile: true });
   await screenshot("dashboard-mobile-320.png");
 
+  await click("שיווקים"); await waitText("רשימת שיווקים");
+  await evaluate("document.querySelector('button[aria-label=\"מיון לפי תאריך\"]').click()");
+  assert.equal(await evaluate("document.querySelector('button[aria-label=\"מיון לפי תאריך\"]').closest('th').getAttribute('aria-sort')"), "ascending");
+  await evaluate("document.querySelector('button[aria-label=\"מיון לפי מיכלים\"]').click()");
+  assert.equal(await evaluate("document.querySelector('button[aria-label=\"מיון לפי מיכלים\"]').closest('th').getAttribute('aria-sort')"), "ascending");
+  await click("עריכה"); await waitText("עריכת שיווק");
+  await fill("תאריך שיווק", "2026-09-05"); await fill("חלקה", "2");
+  await screenshot("shipment-edit-mobile-320.png");
+  await page("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await screenshot("shipment-edit-mobile-390.png");
+  await page("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  await screenshot("shipment-edit-desktop.png");
+  await page("Emulation.setDeviceMetricsOverride", { width: 320, height: 844, deviceScaleFactor: 1, mobile: true });
+  await click("שמור שינויים"); await waitFor(() => evaluate("!document.querySelector('dialog[open]')"), "shipment saved");
+  await waitText("05/09/2026"); assert.equal(shipmentVersion, 1);
+
+  role = "worker"; await seedSession(); await page("Page.navigate", { url: origin }); await waitText("עובד");
+  await click("שיווקים"); await waitText("רשימת שיווקים"); await click("עריכה");
+  await fill("מספר מיכלים", "3"); await click("שמור שינויים");
+  await waitFor(() => evaluate("!document.querySelector('dialog[open]')"), "worker edit saved");
+  assert.equal(shipmentVersion, 2);
+
   role = "viewer"; await seedSession(); await page("Page.navigate", { url: origin }); await waitText("צופה");
   assert.equal(await evaluate("[...document.querySelectorAll('button')].some(item=>item.textContent.trim()==='תקבולים')"), false);
   assert.equal(await evaluate("[...document.querySelectorAll('button')].some(item=>item.textContent.trim()==='שמור שיווק')"), false);
+  await click("שיווקים"); await waitText("רשימת שיווקים");
+  assert.equal(await evaluate("[...document.querySelectorAll('button')].some(item=>item.textContent.trim()==='עריכה')"), false);
+  await evaluate("document.querySelector('button[aria-label=\"מיון לפי מיכלים\"]').click()");
+  assert.equal(await evaluate("document.querySelector('button[aria-label=\"מיון לפי מיכלים\"]').closest('th').getAttribute('aria-sort')"), "ascending");
   assert.deepEqual(errors, []);
-  console.log(`Mobile browser checks passed: draft → edit → confirm → dashboard; unsaved navigation; viewer permissions. Screenshots: ${temp}`);
+  console.log(`Mobile browser checks passed: receipts, dashboard, sorting for viewers, shipment editing for admins/workers, mobile dialog. Screenshots: ${temp}`);
 } catch (error) {
   console.error("Browser failure context:", await failureInfo());
   throw error;

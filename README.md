@@ -4,6 +4,8 @@
 
 הפעלת מסך התקבולים ויצירת טבלאות ופונקציות ב־Supabase: [RECEIPTS_SETUP.md](./RECEIPTS_SETUP.md).
 
+הפעלת עריכת שיווקים: [SHIPMENTS_SETUP.md](./SHIPMENTS_SETUP.md).
+
 בדיקות הרשאות מסד נתונים: `npm run test:auth` (PostgreSQL מקומי דרך PGlite, ללא שינוי מסד הנתונים האמיתי).
 
 ## Getting Started
