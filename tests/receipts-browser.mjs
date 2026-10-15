@@ -131,12 +131,19 @@ try {
         assert.equal(role, "admin");
         workspace.shipments[0].used_containers = paidWeights()[0]?.containers || 0;
         body = workspace;
-      } else if (url.pathname.endsWith("/edit_farm_shipment")) {
+      } else if (url.pathname.endsWith("/get_shipment_traders")) {
+        assert.ok(role === "admin" || role === "worker");
+        body = [...workspace.traders, { id: "2", name: "סוחר נוסף" }];
+      } else if (url.pathname.endsWith("/edit_farm_shipment_with_trader")) {
         assert.ok(role === "admin" || role === "worker");
         const request = JSON.parse(event.request.postData);
         assert.equal(request.expected_version, shipmentVersion);
+        if (request.new_trader_id !== workspace.shipments[0].trader_id && workspace.receipts.some((r) => r.status !== "cancelled" && r.lines.some((l) => l.allocations.some((a) => a.harvest_event_id === "1")))) {
+          await page("Fetch.fulfillRequest", { requestId: event.requestId, responseCode: 400, responseHeaders: [{ name: "Content-Type", value: "application/json" }, { name: "Access-Control-Allow-Origin", value: origin }], body: Buffer.from(JSON.stringify({ message: "LINKED_TRADER" })).toString("base64") });
+          return;
+        }
         Object.assign(workspace.shipments[0], { harvest_date: request.new_date,
-          variety_id: String(request.new_variety_id), plot_id: String(request.new_plot_id), containers: request.new_containers });
+          variety_id: String(request.new_variety_id), plot_id: String(request.new_plot_id), containers: request.new_containers, trader_id: request.new_trader_id });
         shipmentVersion++; body = { id: "1", edit_version: shipmentVersion };
       } else if (url.pathname.endsWith("/delete_farm_receipt")) {
         assert.equal(role, "admin");
@@ -240,6 +247,11 @@ try {
   assert.equal(await evaluate("document.querySelectorAll('td span[title^=\"שויך תשלום מאושר\"]').length"), 1);
   await evaluate("document.querySelector('button[aria-label^=\"ערוך שיווק\"]').click()"); await waitText("עריכת שיווק");
   await fill("תאריך שיווק", "2026-09-05"); await fill("חלקה", "2");
+  await waitFor(() => evaluate("[...document.querySelectorAll('label')].find(l=>l.textContent.startsWith('סוחר'))?.querySelector('select')?.options.length>=3"), "shipment traders loaded");
+  await fill("סוחר", "2"); await click("שמור שינויים");
+  await waitText("לא ניתן לשנות סוחר בשיווק המשויך");
+  assert.equal(shipmentVersion, 0); assert.equal(workspace.shipments[0].trader_id, "1");
+  await fill("סוחר", "1");
   await click("מסמכים מצורפים");
   await waitText("אין מסמכים מצורפים");
   const photoPath = join(temp, "test-receipt.png");
@@ -369,6 +381,12 @@ try {
   await fill("מספר מיכלים", "3"); await click("שמור שינויים");
   await waitFor(() => evaluate("!document.querySelector('dialog[open]')"), "worker edit saved");
   assert.equal(shipmentVersion, 2);
+  workspace.receipts.forEach((r) => { r.status = "cancelled"; });
+  await evaluate("document.querySelector('button[aria-label^=\"ערוך שיווק\"]').click()");
+  await waitFor(() => evaluate("[...document.querySelectorAll('label')].find(l=>l.textContent.startsWith('סוחר'))?.querySelector('select')?.options.length>=3"), "worker trader options");
+  await fill("סוחר", "2"); await click("שמור שינויים");
+  await waitFor(() => evaluate("!document.querySelector('dialog[open]')"), "worker changed trader");
+  assert.equal(workspace.shipments[0].trader_id, "2"); assert.equal(shipmentVersion, 3);
 
   role = "viewer"; await seedSession(); await page("Page.navigate", { url: origin }); await waitText("צופה");
   assert.equal(await evaluate("[...document.querySelectorAll('button')].some(item=>item.textContent.trim()==='תקבולים')"), false);

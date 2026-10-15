@@ -24,6 +24,7 @@ type Shipment = {
   varietyId: number;
   plotId: number;
   editVersion: number;
+  traderId: string;
 };
 
 export default function Home() {
@@ -130,7 +131,7 @@ function FarmApp() {
   const loadShipments = useCallback(async () => {
     const records: {
       id: string | number; harvest_date: string; variety_id: number; plot_id: number;
-      containers: number; container_size: string; edit_version?: number;
+      containers: number; container_size: string; edit_version?: number; trader_id: string | number | null;
     }[] = [];
     // Fetch all pages so the dashboard is not limited by the REST row cap.
     for (let offset = 0; ; offset += 500) {
@@ -176,6 +177,7 @@ function FarmApp() {
       varietyId: Number(record.variety_id),
       plotId: Number(record.plot_id),
       editVersion: record.edit_version ?? 0,
+      traderId: String(record.trader_id ?? ""),
     }));
   
     setShipments(mappedShipments);

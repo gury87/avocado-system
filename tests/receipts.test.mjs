@@ -81,6 +81,7 @@ test("Receipt SQL enforces atomic accounting, permissions and allocation limits"
       alter table storage.objects enable row level security;
       grant select, insert, delete on storage.objects to authenticated;`);
     await db.exec(await read("supabase/migrations/006_reports_documents.sql"));
+    await db.exec(await read("supabase/migrations/007_edit_shipment_trader.sql"));
     const asUser = async (user, query, params = [], role = "authenticated") => {
       await db.exec(`begin; set local role ${role};`);
       try {
@@ -259,6 +260,34 @@ test("Receipt SQL enforces atomic accounting, permissions and allocation limits"
       assert.equal((await asUser(viewer, "delete from storage.objects returning id")).length, 0);
       await asUser(admin, "delete from farm_documents where id=$1", [document.id]);
       await asUser(admin, "select delete_farm_receipt($1,$2)", [draft.id, draft.version]);
+    });
+    await t.test("Shipment trader editing validates roles, versions and receipt links atomically", async () => {
+      for (const user of [admin, worker]) assert.equal((await asUser(user, "select * from get_shipment_traders()")).length, 2);
+      await assert.rejects(asUser(viewer, "select * from get_shipment_traders()"), /FORBIDDEN/);
+      const [shipment] = (await db.query("insert into harvest_events(trader_id,harvest_date,variety_id,plot_id,containers,container_size) values (1,'2026-09-10',2,1,3,'קטן') returning id::text as id")).rows;
+      const change = (user, version, trader, count = 3, role = "authenticated") => asUser(user,
+        "select edit_farm_shipment_with_trader($1,$2,'2026-09-10',2,1,$3,$4)", [shipment.id, version, count, trader], role);
+      await assert.rejects(change(viewer, 0, "2"), /FORBIDDEN/);
+      await assert.rejects(change("", 0, "2", 3, "anon"), /permission denied/);
+      await assert.rejects(change(admin, 0, "999"), /INVALID_TRADER/);
+      await assert.rejects(change(admin, 0, "2", 0), /INVALID_SHIPMENT/);
+      await change(worker, 0, "2");
+      const [updated] = await asUser(admin, "select trader_id,edit_version from harvest_events where id::text=$1", [shipment.id]);
+      assert.equal(Number(updated.trader_id), 2); assert.equal(updated.edit_version, 1);
+      await assert.rejects(change(admin, 0, "1"), /STALE_SHIPMENT/);
+      await change(admin, 1, "1");
+      const draft = receipt([line({ shipment: shipment.id })]);
+      draft.version = (await save(draft, false)).version;
+      await assert.rejects(change(admin, 2, "2"), /LINKED_TRADER/);
+      await change(worker, 2, "1"); // Unchanged trader still permits other edits.
+      draft.version = (await save(draft, true)).version;
+      await assert.rejects(change(worker, 3, "2"), /LINKED_TRADER/);
+      assert.equal(Number((await asUser(admin, "select trader_id from harvest_events where id::text=$1", [shipment.id]))[0].trader_id), 1);
+      await asUser(admin, "select cancel_farm_receipt($1,$2,'תיקון סוחר')", [draft.id, draft.version]);
+      await change(admin, 3, "2");
+      const [audit] = await asUser(admin, "select * from audit_log where action='shipment_trader_updated' and entity_id=$1 order by id desc", [shipment.id]);
+      assert.equal(audit.details.before.trader_id, 1); assert.equal(audit.details.after.trader_id, 2);
+      assert.equal(audit.details.after.edit_version, 4);
     });
   } finally { await db.close(); }
 });
