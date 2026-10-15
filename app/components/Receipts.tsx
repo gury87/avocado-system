@@ -115,7 +115,12 @@ export default function Receipts({ onChanged, onDirtyChange }: { onChanged: () =
           }}>{workspace.traders.map((trader) => <option key={trader.id} value={trader.id}>{trader.name}</option>)}</select></label>
           <label className="block text-sm">אמצעי תשלום<select value={receipt.method} onChange={(e) => update({ ...receipt, method: e.target.value as Receipt["method"] })} className={inputClass}>{Object.entries(paymentMethods).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
           <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2">
-            <label className="min-w-0 text-sm">{receipt.method === "cheque" ? "תאריך פירעון ההמחאה" : receipt.method === "bank" ? "תאריך ההעברה" : "תאריך קבלת המזומן"}<input required type="date" value={receipt.payment_date} onChange={(e) => update({ ...receipt, payment_date: e.target.value })} className={inputClass} /></label>
+            <label className="min-w-0 text-sm">{receipt.method === "cheque" ? "תאריך פירעון ההמחאה" : receipt.method === "bank" ? "תאריך ההעברה" : "תאריך קבלת המזומן"}<input required type="date" value={receipt.payment_date} onChange={(e) => update({
+              ...receipt,
+              payment_date: e.target.value,
+              received_date: !original && receipt.method === "cheque" && !receipt.received_date
+                ? e.target.value : receipt.received_date,
+            })} className={inputClass} /></label>
             {receipt.method === "cheque" && <label className="min-w-0 text-sm">תאריך קבלת ההמחאה (רשות)<input type="date" value={receipt.received_date} onChange={(e) => update({ ...receipt, received_date: e.target.value })} className={inputClass} /></label>}
             <label className="min-w-0 text-sm">סכום התקבול בפועל (₪)<input type="number" inputMode="decimal" min="0" step="0.01" value={receipt.amount} onChange={(e) => update({ ...receipt, amount: e.target.value })} className={inputClass} /></label>
             <label className="min-w-0 text-sm">{receipt.method === "cheque" ? "מספר המחאה (רשות)" : "אסמכתה (רשות)"}<input maxLength={200} value={receipt.reference} onChange={(e) => update({ ...receipt, reference: e.target.value })} className={inputClass} /></label>
