@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "./AuthGate";
 import ReceiptLineEditor from "./ReceiptLineEditor";
+import Documents from "./Documents";
 import {
   cents, dateLabel, money, newLine, newReceipt, normalizeWorkspace, paymentMethods,
   plots, receiptError, receiptValidation, totalLineCents, varieties,
@@ -175,6 +176,7 @@ export default function Receipts({ onChanged, onDirtyChange }: { onChanged: () =
           {item.received_date && <p>התקבל בתאריך: {dateLabel(item.received_date)}</p>}
           {item.reference && <p className="break-words">אסמכתה: {item.reference}</p>}
           {item.notes && <p className="whitespace-pre-line break-words">{item.notes}</p>}
+          <Documents kind="receipt" id={item.id} onBusyChange={(working) => { setBusy(working); onDirtyChange(working); }} />
           <p>סכום הפירוט: {money(totalLineCents(item))} · הפרש: {money(cents(item.amount) - totalLineCents(item))}</p>
           {item.adjustment_reason && <p className="break-words">הסבר להפרש: {item.adjustment_reason}</p>}
           {item.lines.map((line, index) => <div key={line.id} className="space-y-1 rounded-xl bg-zinc-50 p-3">

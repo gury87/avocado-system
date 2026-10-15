@@ -6,6 +6,7 @@ import { supabase } from "./lib/supabase";
 import Dashboard from "./components/Dashboard";
 import AuthGate, { useAuth } from "./components/AuthGate";
 import Receipts from "./components/Receipts";
+import Reports from "./components/Reports";
 import type { PaidWeight } from "./lib/receipts";
 import ShipmentEditor from "./components/ShipmentEditor";
 import { sortShipments, type ShipmentSort, type ShipmentSortKey } from "./lib/shipments";
@@ -34,7 +35,7 @@ function FarmApp() {
   const canCreate = profile.role === "admin" || profile.role === "worker";
   const canDelete = profile.role === "admin";
   const [activeTab, setActiveTab] = useState<
-    "dashboard" | "shipments" | "shipment-list" | "receipts"
+    "dashboard" | "shipments" | "shipment-list" | "receipts" | "reports"
   >("shipments");
 
   const [shipments, setShipments] = useState<Shipment[]>([]);
@@ -277,7 +278,8 @@ function FarmApp() {
 
       if (error || !data?.some((record) => String(record.id) === shipment.id)) {
         console.error("Error deleting shipment:", error);
-        alert(error?.code === "23503" ? "לא ניתן למחוק שיווק המשויך לתקבול, כדי לשמור את היסטוריית הנתונים." : "השיווק לא נמחק. נסה שוב או בדוק את הרשאות המחיקה.");
+        alert(error?.message.includes("farm_documents") ? "לשיווק מצורפים מסמכים. יש להסיר אותם בחלון העריכה לפני מחיקת השיווק."
+          : error?.code === "23503" ? "לא ניתן למחוק שיווק המשויך לתקבול, כדי לשמור את היסטוריית הנתונים." : "השיווק לא נמחק. נסה שוב או בדוק את הרשאות המחיקה.");
         return;
       }
 
@@ -337,8 +339,10 @@ function FarmApp() {
             onClick={() => selectTab("receipts")}
             className={`min-h-11 rounded-xl p-3 ${activeTab === "receipts" ? "bg-zinc-900 text-white" : "bg-white text-zinc-700"}`}
           >תקבולים</button>}
+          {canDelete && <button onClick={() => selectTab("reports")} className={`min-h-11 rounded-xl p-3 ${activeTab === "reports" ? "bg-zinc-900 text-white" : "bg-white text-zinc-700"}`}>דוחות ומעקב</button>}
         </div>
 
+        {activeTab === "reports" && canDelete && <Reports />}
         {activeTab === "dashboard" && (
           <Dashboard shipments={shipments} paidWeights={paidWeights} weightsError={weightsError} />
         )}

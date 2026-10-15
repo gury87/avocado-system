@@ -74,6 +74,13 @@ test("Receipt SQL enforces atomic accounting, permissions and allocation limits"
     await db.exec(await read("supabase/migrations/003_receipts.sql"));
     await db.exec(await read("supabase/migrations/004_edit_shipments.sql"));
     await db.exec(await read("supabase/migrations/005_delete_receipts.sql"));
+    // Supabase Storage provides these tables/roles in production.
+    await db.exec(`create schema storage; grant usage on schema storage to anon, authenticated;
+      create table storage.buckets(id text primary key, name text, public boolean, file_size_limit bigint, allowed_mime_types text[]);
+      create table storage.objects(id uuid primary key default gen_random_uuid(), bucket_id text, name text);
+      alter table storage.objects enable row level security;
+      grant select, insert, delete on storage.objects to authenticated;`);
+    await db.exec(await read("supabase/migrations/006_reports_documents.sql"));
     const asUser = async (user, query, params = [], role = "authenticated") => {
       await db.exec(`begin; set local role ${role};`);
       try {
@@ -228,6 +235,30 @@ test("Receipt SQL enforces atomic accounting, permissions and allocation limits"
         await assert.rejects(remove(item), /STALE_RECEIPT/);
       }
       assert.deepEqual(await weights(), beforeWeights, "Deleting unpaid receipts leaves paid totals unchanged");
+    });
+    await t.test("Reports and private documents are admin-only, with real parent references", async () => {
+      for (const user of [worker, viewer]) await assert.rejects(asUser(user, "select get_farm_reports()"), /FORBIDDEN/);
+      await assert.rejects(asUser("", "select get_farm_reports()", [], "anon"), /permission denied/);
+      const [report] = await asUser(admin, "select get_farm_reports() as data");
+      assert.equal(report.data.shipments.length, 5);
+      assert.equal(Number(report.data.shipments.find((s) => s.id === "5").picking_cost), 780);
+      const [bucket] = (await db.query("select * from storage.buckets where id='farm-documents'")).rows;
+      assert.equal(bucket.public, false); assert.equal(Number(bucket.file_size_limit), 10485760);
+      const draft = receipt(); draft.version = (await save(draft, false)).version;
+      const params = [draft.id, "receipt/test/file.pdf", "מסמך.pdf"];
+      const insert = "insert into farm_documents(receipt_id,storage_path,file_name,mime_type,file_size) values ($1,$2,$3,'application/pdf',100) returning id";
+      for (const user of [worker, viewer]) await assert.rejects(asUser(user, insert, params), /row-level security/);
+      const [document] = await asUser(admin, insert, params);
+      assert.equal((await asUser(worker, "select * from farm_documents")).length, 0);
+      assert.equal((await asUser(viewer, "delete from farm_documents returning id")).length, 0);
+      await assert.rejects(asUser(admin, "select delete_farm_receipt($1,$2)", [draft.id, draft.version]), /foreign key/);
+      await assert.rejects(asUser(admin, insert, [randomUUID(), "missing.pdf", "missing.pdf"]), /foreign key/);
+      await asUser(admin, "insert into storage.objects(bucket_id,name) values ('farm-documents','test.pdf')");
+      assert.equal((await asUser(worker, "select * from storage.objects")).length, 0);
+      await assert.rejects(asUser(worker, "insert into storage.objects(bucket_id,name) values ('farm-documents','bad.pdf')"), /row-level security/);
+      assert.equal((await asUser(viewer, "delete from storage.objects returning id")).length, 0);
+      await asUser(admin, "delete from farm_documents where id=$1", [document.id]);
+      await asUser(admin, "select delete_farm_receipt($1,$2)", [draft.id, draft.version]);
     });
   } finally { await db.close(); }
 });

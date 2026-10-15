@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { dateLabel, plots, varieties } from "../lib/receipts";
 import { useAuth } from "./AuthGate";
+import Documents from "./Documents";
 
 export type EditableShipment = {
   id: string; date: string; variety: string; plot: string; containers: number;
@@ -73,6 +74,7 @@ export default function ShipmentEditor({ shipment, onClose, onSaved, onDirtyChan
         <label className="block text-sm">מספר מיכלים<input required type="number" inputMode="numeric" min="1" max="1000000" step="1" value={form.containers} onChange={(e) => update("containers", e.target.value)} className={inputClass} /></label>
       </fieldset>
       <p className="text-xs text-zinc-500">שינוי תאריך או חלקה יעדכן גם את פילוח הנתונים בדשבורד. שיוכים לתקבולים נשמרים.</p>
+      <Documents kind="shipment" id={shipment.id} onBusyChange={(working) => { setBusy(working); onDirtyChange(working || dirty); }} />
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
       <div className="grid grid-cols-2 gap-2">
         <button disabled={busy} type="submit" className="min-h-11 rounded-xl bg-zinc-900 p-3 text-white disabled:opacity-50">{busy ? "שומר…" : "שמור שינויים"}</button>

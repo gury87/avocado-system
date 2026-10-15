@@ -101,6 +101,7 @@ export function receiptValidation(receipt: Receipt): string | null {
 }
 
 export function receiptError(message: string) {
+  if (message.includes("farm_documents")) return "לתקבול מצורפים מסמכים. יש להסיר אותם לפני מחיקת התקבול.";
   const messages: Record<string, string> = {
     FORBIDDEN: "רק מנהל פעיל יכול לנהל תקבולים.",
     STALE_RECEIPT: "התקבול השתנה מאז שפתחת אותו, או שהשמירה הקודמת כבר הושלמה. רענן ופתח אותו מחדש לפני עריכה.",

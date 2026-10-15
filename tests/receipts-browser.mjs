@@ -74,6 +74,8 @@ try {
   let writes = 0;
   let shipmentVersion = 0;
   const requests = [];
+  let documents = [];
+  const storedFiles = new Set();
   handlers.set("Fetch.requestPaused", [(event) => {
     void (async () => {
       const url = new URL(event.request.url);
@@ -93,7 +95,31 @@ try {
       else if (url.pathname === "/rest/v1/profiles") body = profile();
       else if (url.pathname === "/rest/v1/harvest_events") body = [{ ...workspace.shipments[0], id: 1, edit_version: shipmentVersion, container_size: "קטן" }];
       else if (url.pathname.endsWith("/get_paid_shipment_weights")) body = paidWeights();
-      else if (url.pathname.endsWith("/get_receipt_workspace")) {
+      else if (url.pathname.endsWith("/get_farm_reports")) {
+        assert.equal(role, "admin");
+        body = { ...workspace, traders: [...workspace.traders, { id: "2", name: "סוחר נוסף" }], shipments: [
+          { ...workspace.shipments[0], containers: 4, picking_cost: 520 },
+          { id: "2", trader_id: "2", variety_id: "1", plot_id: "2", harvest_date: "2026-09-10", containers: 3, picking_cost: null },
+        ] };
+      } else if (url.pathname === "/rest/v1/farm_documents") {
+        assert.equal(role, "admin");
+        if (event.request.method === "POST") {
+          const item = JSON.parse(event.request.postData); item.id = crypto.randomUUID();
+          assert.ok(storedFiles.has(item.storage_path)); documents.push(item); body = null;
+        } else if (event.request.method === "DELETE") {
+          documents = documents.filter((d) => d.id !== url.searchParams.get("id").replace("eq.", "")); body = null;
+        } else {
+          body = documents.filter((d) => ["receipt_id", "shipment_id", "storage_path"].every((key) => !url.searchParams.has(key) || d[key] === url.searchParams.get(key).replace("eq.", "")));
+        }
+      } else if (url.pathname.startsWith("/storage/v1/object/farm-documents/")) {
+        assert.equal(role, "admin");
+        const path = decodeURIComponent(url.pathname.split("/farm-documents/")[1]);
+        storedFiles.add(path); body = { Key: `farm-documents/${path}` };
+      } else if (url.pathname === "/storage/v1/object/farm-documents" && event.request.method === "DELETE") {
+        assert.equal(role, "admin");
+        const { prefixes } = JSON.parse(event.request.postData);
+        prefixes.forEach((path) => storedFiles.delete(path)); body = [];
+      } else if (url.pathname.endsWith("/get_receipt_workspace")) {
         assert.equal(role, "admin");
         workspace.shipments[0].used_containers = paidWeights()[0]?.containers || 0;
         body = workspace;
@@ -206,6 +232,19 @@ try {
   assert.equal(await evaluate("document.querySelectorAll('td span[title^=\"שויך תשלום מאושר\"]').length"), 1);
   await evaluate("document.querySelector('button[aria-label^=\"ערוך שיווק\"]').click()"); await waitText("עריכת שיווק");
   await fill("תאריך שיווק", "2026-09-05"); await fill("חלקה", "2");
+  await click("מסמכים מצורפים");
+  await waitText("אין מסמכים מצורפים");
+  const pdfPath = join(temp, "test-receipt.pdf");
+  await writeFile(pdfPath, "%PDF-1.4\n%test fixture\n%%EOF");
+  const upload = async () => {
+    const { root: dom } = await page("DOM.getDocument");
+    const { nodeId } = await page("DOM.querySelector", { nodeId: dom.nodeId, selector: 'input[type="file"]' });
+    await page("DOM.setFileInputFiles", { nodeId, files: [pdfPath] });
+    await waitText("test-receipt.pdf");
+  };
+  await upload();
+  assert.equal(documents[0].shipment_id, "1");
+  assert.equal(storedFiles.size, 1);
   await screenshot("shipment-edit-mobile-320.png");
   await page("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await screenshot("shipment-edit-mobile-390.png");
@@ -214,6 +253,46 @@ try {
   await page("Emulation.setDeviceMetricsOverride", { width: 320, height: 844, deviceScaleFactor: 1, mobile: true });
   await click("שמור שינויים"); await waitFor(() => evaluate("!document.querySelector('dialog[open]')"), "shipment saved");
   await waitText("05/09/2026"); assert.equal(shipmentVersion, 1);
+
+  await click("דוחות ומעקב"); await waitText("יתרות פתוחות לפי סוחר");
+  await waitFor(() => evaluate("!!document.querySelector('summary')"), "reports loaded");
+  assert.ok((await text()).includes("5 מיכלים"), "Both traders' open containers are counted");
+  await screenshot("reports-balances-mobile-320.png");
+  await click("מחירים ומגמות"); await waitText("מגמה חודשית");
+  assert.ok((await text()).includes("1.80"), "Weighted price uses confirmed revenue / kg");
+  await screenshot("reports-prices-mobile-320.png");
+  await click("סיכום עונה"); await waitText("פירוט לפי חלקה וזן");
+  await fill("עונה", "2026");
+  await waitText("השוואה לתקופה המקבילה");
+  await screenshot("reports-season-mobile-320.png");
+  await page("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await screenshot("reports-season-mobile-390.png");
+  await page("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  await screenshot("reports-season-desktop.png");
+  await page("Emulation.setDeviceMetricsOverride", { width: 320, height: 844, deviceScaleFactor: 1, mobile: true });
+  await send("Browser.setDownloadBehavior", { behavior: "allow", downloadPath: temp, eventsEnabled: true });
+  let downloadName;
+  handlers.set("Browser.downloadWillBegin", [(event) => { downloadName = event.suggestedFilename; }]);
+  await click("ייצוא לאקסל");
+  const excel = await waitFor(async () => {
+    try { return downloadName ? await readFile(join(temp, downloadName)) : null; } catch { return null; }
+  }, "Excel downloaded");
+  assert.equal(excel.readUInt32LE(0), 0x04034b50);
+  assert.ok(excel.includes(Buffer.from("xl/worksheets/sheet6.xml")));
+  await fill("סוחר", "2");
+  assert.ok((await text()).includes("חסרים נתוני עלות"));
+  await click("יתרות סוחרים");
+  assert.ok((await text()).includes("3 מיכלים"));
+  await click("תקבולים"); await waitText("תקבולים קודמים");
+  await evaluate("document.querySelectorAll('details').forEach(item=>item.open=true)");
+  await click("מסמכים מצורפים"); await waitText("אין מסמכים מצורפים");
+  await upload();
+  assert.equal(documents.filter((d) => d.receipt_id).length, 1);
+  acceptDialog = false; await click("מחיקה"); acceptDialog = true;
+  assert.equal(documents.length, 2);
+  await click("מחיקה"); await waitText("אין מסמכים מצורפים");
+  assert.equal(documents.length, 1); assert.equal(storedFiles.size, 1);
+  await click("שיווקים");
 
   for (const status of ["draft", "cancelled"]) {
     const item = structuredClone(workspace.receipts[0]);
@@ -236,6 +315,7 @@ try {
   }
 
   role = "worker"; await seedSession(); await page("Page.navigate", { url: origin }); await waitText("עובד");
+  assert.equal(await evaluate("[...document.querySelectorAll('button')].some(item=>item.textContent==='דוחות ומעקב')"), false);
   await click("שיווקים"); await waitText("רשימת שיווקים"); await evaluate("document.querySelector('button[aria-label^=\"ערוך שיווק\"]').click()");
   await fill("מספר מיכלים", "3"); await click("שמור שינויים");
   await waitFor(() => evaluate("!document.querySelector('dialog[open]')"), "worker edit saved");
@@ -249,7 +329,7 @@ try {
   await evaluate("document.querySelector('button[aria-label=\"מיון לפי מיכלים\"]').click()");
   assert.equal(await evaluate("document.querySelector('button[aria-label=\"מיון לפי מיכלים\"]').closest('th').getAttribute('aria-sort')"), "ascending");
   assert.deepEqual(errors, []);
-  console.log(`Mobile browser checks passed: receipts, dashboard, sorting for viewers, shipment editing for admins/workers, mobile dialog. Screenshots: ${temp}`);
+  console.log(`Browser checks passed: receipts, dashboard, mobile shipments, reports/filters, Excel download, shipment/receipt documents and role permissions. Screenshots: ${temp}`);
 } catch (error) {
   console.error("Browser failure context:", await failureInfo());
   throw error;

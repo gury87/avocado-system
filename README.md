@@ -1,5 +1,7 @@
 מערכת ניהול מטעי אבוקדו — Next.js, React ו־Supabase.
 
+הפעלת דוחות סוחרים, מחירים, סיכום עונה, ייצוא לאקסל ומסמכים פרטיים: [REPORTS_SETUP.md](./REPORTS_SETUP.md).
+
 הפעלת התחברות, חשבון מנהל ראשון, הזמנות והרשאות: [AUTH_SETUP.md](./AUTH_SETUP.md).
 
 הפעלת מסך התקבולים ויצירת טבלאות ופונקציות ב־Supabase: [RECEIPTS_SETUP.md](./RECEIPTS_SETUP.md).
