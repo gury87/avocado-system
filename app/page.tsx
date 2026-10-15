@@ -25,6 +25,32 @@ export default function Home() {
   const [shipmentLimit, setShipmentLimit] = useState("5");
   const [varietyFilter, setVarietyFilter] = useState("");
   const [plotFilter, setPlotFilter] = useState("");
+  const [listFilters, setListFilters] = useState({
+    variety: "",
+    plot: "",
+    containers: "",
+    size: "",
+    fromDate: "",
+    toDate: "",
+  });
+  const invalidDateRange = Boolean(
+    listFilters.fromDate && listFilters.toDate && listFilters.fromDate > listFilters.toDate
+  );
+  const listShipments = shipments.filter((shipment) =>
+    !invalidDateRange &&
+    (!listFilters.variety || shipment.variety === listFilters.variety) &&
+    (!listFilters.plot || shipment.plot === listFilters.plot) &&
+    (!listFilters.containers || shipment.containers === Number(listFilters.containers)) &&
+    (!listFilters.size || shipment.size === listFilters.size) &&
+    (!listFilters.fromDate || shipment.date >= listFilters.fromDate) &&
+    (!listFilters.toDate || shipment.date <= listFilters.toDate)
+  );
+  const listColumns = [
+    { key: "variety", label: "זן" },
+    { key: "plot", label: "חלקה" },
+    { key: "containers", label: "מיכלים" },
+    { key: "size", label: "גודל" },
+  ] as const;
   const varietyOptions = [...new Set(shipments.map((shipment) => shipment.variety))]
     .filter(Boolean)
     .sort((a, b) => a.localeCompare(b, "he"));
@@ -231,7 +257,7 @@ export default function Home() {
                 : "bg-white text-zinc-700"
             }`}
           >
-            שיווקים
+            ראשי
           </button>
 
           <button
@@ -242,7 +268,7 @@ export default function Home() {
                 : "bg-white text-zinc-700"
             }`}
           >
-            רשימת שיווקים
+            שיווקים
           </button>
 
           <button
@@ -302,21 +328,75 @@ export default function Home() {
         {activeTab === "shipment-list" && (
           <section className="bg-white rounded-2xl border border-zinc-200 overflow-hidden">
             <h2 className="p-4 text-lg font-semibold text-zinc-900">רשימת שיווקים</h2>
+            <div className="space-y-3 px-4 pb-4 text-sm text-zinc-700">
+              <fieldset className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2">
+                <legend className="mb-2 font-medium">טווח תאריכי שיווק</legend>
+                <label className="min-w-0">
+                  <span className="mb-1 block">מתאריך</span>
+                  <input
+                    type="date"
+                    value={listFilters.fromDate}
+                    max={listFilters.toDate || undefined}
+                    onChange={(e) => setListFilters((current) => ({ ...current, fromDate: e.target.value }))}
+                    aria-invalid={invalidDateRange}
+                    className="min-h-11 w-full min-w-0 rounded-lg border border-zinc-300 bg-white p-2 text-base"
+                  />
+                </label>
+                <label className="min-w-0">
+                  <span className="mb-1 block">עד תאריך</span>
+                  <input
+                    type="date"
+                    value={listFilters.toDate}
+                    min={listFilters.fromDate || undefined}
+                    onChange={(e) => setListFilters((current) => ({ ...current, toDate: e.target.value }))}
+                    aria-invalid={invalidDateRange}
+                    className="min-h-11 w-full min-w-0 rounded-lg border border-zinc-300 bg-white p-2 text-base"
+                  />
+                </label>
+              </fieldset>
+              {invalidDateRange && (
+                <p role="alert" className="text-red-600">תאריך הסיום חייב להיות בתאריך ההתחלה או אחריו.</p>
+              )}
+              <button
+                type="button"
+                onClick={() => setListFilters({ variety: "", plot: "", containers: "", size: "", fromDate: "", toDate: "" })}
+                className="min-h-11 rounded-lg border border-zinc-300 px-3"
+              >
+                נקה סינון
+              </button>
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full text-right text-xs text-zinc-700">
                 <caption className="sr-only">כל השיווקים לפי תאריך, מהחדש לישן</caption>
                 <thead className="bg-zinc-50 text-zinc-900">
                   <tr>
                     <th scope="col" className="px-2 py-2">תאריך</th>
-                    <th scope="col" className="px-2 py-2">זן</th>
-                    <th scope="col" className="px-2 py-2">חלקה</th>
-                    <th scope="col" className="px-2 py-2">מיכלים</th>
-                    <th scope="col" className="px-2 py-2">גודל</th>
+                    {listColumns.map(({ key, label }) => (
+                      <th key={key} scope="col" className="px-2 py-2">
+                        <label htmlFor={`list-${key}`} className="mb-1 block">{label}</label>
+                        <select
+                          id={`list-${key}`}
+                          value={listFilters[key]}
+                          onChange={(e) => setListFilters((current) => ({ ...current, [key]: e.target.value }))}
+                          className="min-h-11 min-w-20 w-full rounded-lg border border-zinc-300 bg-white p-2 text-base font-normal"
+                        >
+                          <option value="">הכל</option>
+                          {[...new Set(shipments.map((shipment) => shipment[key]))]
+                            .filter((value) => value !== "")
+                            .sort((a, b) => key === "containers"
+                              ? Number(a) - Number(b)
+                              : String(a).localeCompare(String(b), "he"))
+                            .map((value) => (
+                              <option key={value} value={value}>{value}</option>
+                            ))}
+                        </select>
+                      </th>
+                    ))}
                     <th scope="col" className="px-1 py-2"><span className="sr-only">מחיקה</span></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-100">
-                  {shipments.map((shipment) => (
+                  {listShipments.map((shipment) => (
                     <tr key={shipment.id}>
                       <td className="whitespace-nowrap px-2 py-2">
                         <span dir="ltr">{shipment.date.split("-").reverse().join("/")}</span>
@@ -338,14 +418,14 @@ export default function Home() {
                       </td>
                     </tr>
                   ))}
-                  {shipments.length === 0 && (
-                    <tr><td colSpan={6} className="p-4 text-center text-zinc-500">אין שיווקים להצגה</td></tr>
+                  {listShipments.length === 0 && (
+                    <tr><td colSpan={6} className="p-4 text-center text-zinc-500">אין שיווקים התואמים לסינון</td></tr>
                   )}
                 </tbody>
               </table>
             </div>
             <p aria-live="polite" className="border-t border-zinc-200 px-4 py-3 text-xs text-zinc-500">
-              {deletingId !== null ? "מוחק שיווק…" : `סה״כ ${shipments.length} שיווקים`}
+              {deletingId !== null ? "מוחק שיווק…" : `מוצגים ${listShipments.length} מתוך ${shipments.length} שיווקים`}
             </p>
           </section>
         )}
