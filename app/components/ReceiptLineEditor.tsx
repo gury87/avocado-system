@@ -2,9 +2,12 @@
 
 import { useState } from "react";
 import {
-  calculatedAmount, cents, dateLabel, matchCandidates, money, plots, varieties,
+  calculatedAmount, cents, dateLabel, matchCandidates, money,
   type Receipt, type ReceiptLine, type ReceiptWorkspace,
 } from "../lib/receipts";
+import { useCatalog } from "./FarmCatalog";
+import { catalogOptions } from "../lib/catalog";
+import WeightBreakdown from "./WeightBreakdown";
 
 const inputClass = "mt-1 min-h-11 w-full min-w-0 rounded-lg border border-zinc-300 bg-white p-2 text-base font-normal";
 
@@ -13,6 +16,7 @@ export default function ReceiptLineEditor({ receipt, line, position, workspace, 
   original?: Receipt; onChange: (line: ReceiptLine) => void; onRemove: () => void;
 }) {
   const [showAll, setShowAll] = useState(false);
+  const {catalog,plots,varieties}=useCatalog();
   const candidates = matchCandidates(workspace.shipments, receipt, line, original);
   const shown = showAll ? candidates : candidates.slice(0, 3);
   const assignedContainers = line.allocations.reduce((sum, allocation) => sum + Number(allocation.containers || 0), 0);
@@ -45,7 +49,7 @@ export default function ReceiptLineEditor({ receipt, line, position, workspace, 
     <div className="space-y-4 px-4 pb-4">
       <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2">
         <label className="min-w-0 text-sm">תאריך אצל הסוחר<input type="date" value={line.trader_date} onChange={(e) => update("trader_date", e.target.value)} className={inputClass} /></label>
-        <label className="min-w-0 text-sm">זן<select value={line.variety_id} onChange={(e) => update("variety_id", e.target.value)} className={inputClass}>{Object.entries(varieties).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
+        <label className="min-w-0 text-sm">זן<select value={line.variety_id} onChange={(e) => update("variety_id", e.target.value)} className={inputClass}>{catalogOptions(catalog.varieties,original?.lines.find((l)=>l.id===line.id)?.variety_id).map((e) => <option key={e.id} value={e.id}>{e.name}{e.active?"":" (לא פעיל)"}</option>)}</select></label>
         {([
           ["gross_weight", "משקל ברוטו (ק״ג)", "0.001"], ["containers", "מספר מיכלים", "0.001"],
           ["tare_weight", "משקל מיכל בודד (ק״ג)", "0.001"], ["net_weight", "משקל נטו (ק״ג)", "0.001"],
@@ -53,6 +57,7 @@ export default function ReceiptLineEditor({ receipt, line, position, workspace, 
         ] as const).map(([key, label, step]) => <label key={key} className="min-w-0 text-sm">{label}<input type="number" inputMode="decimal" min="0" step={step} value={line[key]} onChange={(e) => update(key, e.target.value)} className={inputClass} /></label>)}
       </div>
       <p className="text-xs text-zinc-500">הברוטו והנטו נרשמים כפי שמופיעים במסמך הסוחר. תאריך הסוחר אינו משנה את תאריך השיווק.</p>
+      <WeightBreakdown line={line} />
       {expected && <div className="text-sm"><p>נטו × מחיר: {money(cents(expected))}</p>{line.amount && cents(line.amount) !== cents(expected) && <p className="text-amber-800">הפרש מהסכום במסמך: {money(cents(line.amount) - cents(expected))}</p>}<button type="button" onClick={() => onChange({ ...line, amount: expected })} className="min-h-11 underline">השתמש בסכום המחושב</button></div>}
 
       <div className="space-y-3 border-t border-zinc-200 pt-3">

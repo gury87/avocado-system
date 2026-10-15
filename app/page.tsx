@@ -7,6 +7,9 @@ import Dashboard from "./components/Dashboard";
 import AuthGate, { useAuth } from "./components/AuthGate";
 import Receipts from "./components/Receipts";
 import Reports from "./components/Reports";
+import FarmCatalogProvider, { useCatalog, useFarmToday } from "./components/FarmCatalog";
+import FarmSettings from "./components/FarmSettings";
+import { defaultEntry, isOverdue, shipmentAge } from "./lib/catalog";
 import type { PaidWeight } from "./lib/receipts";
 import ShipmentEditor from "./components/ShipmentEditor";
 import { sortShipments, type ShipmentSort, type ShipmentSortKey } from "./lib/shipments";
@@ -28,15 +31,17 @@ type Shipment = {
 };
 
 export default function Home() {
-  return <AuthGate><FarmApp /></AuthGate>;
+  return <AuthGate><FarmCatalogProvider><FarmApp /></FarmCatalogProvider></AuthGate>;
 }
 
 function FarmApp() {
+  const { catalog, plots, varieties } = useCatalog();
+  const farmToday=useFarmToday();
   const { profile, setUnsavedChanges } = useAuth();
   const canCreate = profile.role === "admin" || profile.role === "worker";
   const canDelete = profile.role === "admin";
   const [activeTab, setActiveTab] = useState<
-    "dashboard" | "shipments" | "shipment-list" | "receipts" | "reports"
+    "dashboard" | "shipments" | "shipment-list" | "receipts" | "reports" | "settings"
   >("shipments");
 
   const [shipments, setShipments] = useState<Shipment[]>([]);
@@ -48,10 +53,14 @@ function FarmApp() {
   const [paidWeights, setPaidWeights] = useState<PaidWeight[] | null>(null);
   const paidShipmentIds = new Set((paidWeights || []).filter((item) => item.containers > 0).map((item) => item.harvest_event_id));
   const [weightsError, setWeightsError] = useState(false);
+  const paidByShipment=new Map(paidWeights?.map((p)=>[p.harvest_event_id,p.containers])||[]);
+  const overdueIds=new Set(paidWeights&&!weightsError?shipments.filter((s)=>isOverdue(s.date,s.containers,paidByShipment.get(s.id)||0,catalog.settings.overdue_days,farmToday)).map((s)=>s.id):[]);
   const [receiptsDirty, setReceiptsDirty] = useState(false);
+  const [settingsDirty, setSettingsDirty] = useState(false);
   const selectTab = (tab: typeof activeTab) => {
     if (tab === activeTab) return;
-    if ((receiptsDirty || shipmentEditDirty) && !window.confirm("יש שינויים שלא נשמרו. לעזוב אותם?")) return;
+    if ((receiptsDirty || shipmentEditDirty || settingsDirty) && !window.confirm("יש שינויים שלא נשמרו. לעזוב אותם?")) return;
+    setSettingsDirty(false);
     setEditingShipment(null);
     setShipmentEditDirty(false);
     setReceiptsDirty(false);
@@ -121,8 +130,8 @@ function FarmApp() {
 
   const [form, setForm] = useState({
     date: today,
-    variety: "אטינגר",
-    plot: "בית העלמין",
+    variety: defaultEntry(catalog.varieties, "1"),
+    plot: defaultEntry(catalog.plots, "3"),
     containers: 1,
     picker: "נביל",
   });
@@ -152,25 +161,13 @@ function FarmApp() {
       if (data.length < 500) break;
     }
   
-    const varietyMapping: Record<number, string> = {
-      1: "אטינגר",
-      2: "גליל",
-      3: "הס",
-      4: "פוארטה",
-    };
-  
-    const plotMapping: Record<number, string> = {
-      1: "כביש 70",
-      2: "חלקה א",
-      3: "בית העלמין",
-    };
   
     const uniqueRecords = [...new Map(records.map((record) => [String(record.id), record])).values()];
     const mappedShipments = uniqueRecords.map((record) => ({
       id: String(record.id),
       date: record.harvest_date,
-      variety: varietyMapping[record.variety_id] || "",
-      plot: plotMapping[record.plot_id] || "",
+      variety: varieties[String(record.variety_id)] || "זן לא ידוע",
+      plot: plots[String(record.plot_id)] || "חלקה לא ידועה",
       containers: Number(record.containers),
       size: record.container_size, // Use the value directly from Supabase
       picker: "נביל", // Assuming picker is static for now
@@ -181,7 +178,7 @@ function FarmApp() {
     }));
   
     setShipments(mappedShipments);
-  }, []);
+  }, [plots, varieties]);
 
   // Load shipments on page load
   useEffect(() => {
@@ -192,13 +189,14 @@ function FarmApp() {
 
   const addShipment = async () => {
     if (!canCreate) return;
+    if (!catalog.varieties.some((e)=>e.id===form.variety&&e.active)||!catalog.plots.some((e)=>e.id===form.plot&&e.active)) { alert("יש לבחור חלקה וזן פעילים."); return; }
     const pickingCost = form.containers * 130;
     const confirmationMessage = [
       "האם לשמור את השיווק הבא?",
       "",
       `תאריך: ${form.date.split("-").reverse().join("/")}`,
-      `זן: ${form.variety}`,
-      `חלקה: ${form.plot}`,
+      `זן: ${varieties[form.variety]}`,
+      `חלקה: ${plots[form.plot]}`,
       `מספר מיכלים: ${form.containers}`,
     ].join("\n");
 
@@ -206,24 +204,12 @@ function FarmApp() {
       return;
     }
 
-    const varietyMapping: Record<string, number> = {
-      אטינגר: 1,
-      גליל: 2,
-      הס: 3,
-      פוארטה: 4,
-    };
-
-    const plotMapping: Record<string, number> = {
-      "כביש 70": 1,
-      "חלקה א": 2,
-      "בית העלמין": 3,
-    };
 
     const newShipment = {
       harvest_date: form.date,
-      trader_id: 1,
-      variety_id: varietyMapping[form.variety],
-      plot_id: plotMapping[form.plot],
+      trader_id: Number(defaultEntry(catalog.traders, "1")),
+      variety_id: Number(form.variety),
+      plot_id: Number(form.plot),
       picker_id: 1,
       containers: form.containers,
       container_size: "קטן",
@@ -247,8 +233,8 @@ function FarmApp() {
       // Clear form
       setForm({
         date: today,
-        variety: "אטינגר",
-        plot: "בית העלמין",
+        variety: defaultEntry(catalog.varieties, "1"),
+        plot: defaultEntry(catalog.plots, "3"),
         containers: 1,
         picker: "נביל",
       });
@@ -342,9 +328,11 @@ function FarmApp() {
             className={`min-h-11 rounded-xl p-3 ${activeTab === "receipts" ? "bg-zinc-900 text-white" : "bg-white text-zinc-700"}`}
           >תקבולים</button>}
           {canDelete && <button onClick={() => selectTab("reports")} className={`min-h-11 rounded-xl p-3 ${activeTab === "reports" ? "bg-zinc-900 text-white" : "bg-white text-zinc-700"}`}>דוחות ומעקב</button>}
+          {canDelete && <button onClick={() => selectTab("settings")} className={`min-h-11 rounded-xl p-3 ${activeTab === "settings" ? "bg-zinc-900 text-white" : "bg-white text-zinc-700"}`}>הגדרות המשק</button>}
         </div>
 
         {activeTab === "reports" && canDelete && <Reports />}
+        {activeTab === "settings" && canDelete && <FarmSettings onDirtyChange={(dirty)=>{setSettingsDirty(dirty);setUnsavedChanges(dirty);}} />}
         {activeTab === "dashboard" && (
           <Dashboard shipments={shipments} paidWeights={paidWeights} weightsError={weightsError} />
         )}
@@ -356,6 +344,7 @@ function FarmApp() {
           <section className="bg-white rounded-2xl border border-zinc-200 overflow-hidden">
             <h2 className="p-4 text-lg font-semibold text-zinc-900">רשימת שיווקים</h2>
             <p className="px-4 pb-3 text-xs text-zinc-500">לחץ על כותרת עמודה למיון עולה או יורד.</p>
+            <p className="px-4 pb-3 text-xs text-amber-900">סימון בצהוב: יתרה פתוחה בשיווק שגילו מעל {catalog.settings.overdue_days} ימים.</p>
             {editingShipment && canCreate && <ShipmentEditor
               key={editingShipment.id}
               shipment={editingShipment}
@@ -442,9 +431,10 @@ function FarmApp() {
                 </thead>
                 <tbody className="divide-y divide-zinc-100">
                   {listShipments.map((shipment) => (
-                    <tr key={shipment.id}>
+                    <tr key={shipment.id} data-overdue={overdueIds.has(shipment.id)||undefined} className={overdueIds.has(shipment.id) ? "bg-amber-50" : undefined}>
                       <td className="whitespace-nowrap px-2 py-2">
                         <span dir="ltr">{shipment.date.split("-").reverse().join("/")}</span>
+                        {overdueIds.has(shipment.id) && <span className="block whitespace-normal text-[10px] font-semibold text-amber-900" title={`${shipmentAge(shipment.date,farmToday)} ימים משיווק · יתרה פתוחה מעל ${catalog.settings.overdue_days} ימים`}>ממתין לתשלום</span>}
                       </td>
                       <td className="px-2 py-2">{shipment.variety}</td>
                       <td className="break-words px-2 py-2">{shipment.plot}</td>
@@ -508,10 +498,8 @@ function FarmApp() {
                   }
                   className="w-full rounded-xl border border-zinc-300 p-3 text-zinc-900"
                 >
-                  <option>אטינגר</option>
-                  <option>גליל</option>
-                  <option>הס</option>
-                  <option>פוארטה</option>
+                  {!catalog.varieties.some((e)=>e.id===form.variety&&e.active)&&<option value="">בחר זן פעיל</option>}
+                  {catalog.varieties.filter((e)=>e.active).map((e)=><option key={e.id} value={e.id}>{e.name}</option>)}
                 </select>
 
                 <select
@@ -524,9 +512,8 @@ function FarmApp() {
                   }
                   className="w-full rounded-xl border border-zinc-300 p-3 text-zinc-900"
                 >
-                  <option>בית העלמין</option>
-                  <option>חלקה א</option>
-                  <option>כביש 70</option>
+                  {!catalog.plots.some((e)=>e.id===form.plot&&e.active)&&<option value="">בחר חלקה פעילה</option>}
+                  {catalog.plots.filter((e)=>e.active).map((e)=><option key={e.id} value={e.id}>{e.name}</option>)}
                 </select>
 
                 <input
@@ -611,11 +598,12 @@ function FarmApp() {
                   </thead>
                   <tbody className="divide-y divide-zinc-100">
                     {visibleShipments.map((shipment) => (
-                      <tr key={shipment.id}>
+                      <tr key={shipment.id} className={overdueIds.has(shipment.id)?"bg-amber-50":undefined}>
                         <td className="whitespace-nowrap px-3 py-3">
                           <span dir="ltr">
                             {shipment.date.split("-").reverse().join("/")}
                           </span>
+                          {overdueIds.has(shipment.id)&&<span className="block text-xs text-amber-900">ממתין לתשלום</span>}
                         </td>
                         <td className="px-3 py-3">{shipment.variety}</td>
                         <td className="px-3 py-3">{shipment.plot}</td>

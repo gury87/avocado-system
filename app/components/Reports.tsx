@@ -1,7 +1,9 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
-import { dateLabel, localToday, money, normalizeWorkspace, plots, varieties, type ReceiptWorkspace } from "../lib/receipts";
+import { dateLabel, localToday, money, normalizeWorkspace, type ReceiptWorkspace } from "../lib/receipts";
+import { useCatalog } from "./FarmCatalog";
+import { groupLoss, lossReport, yieldByPlot } from "../lib/analysis";
 import { buildReport, groupReport, type GroupRow, type ReportData, type ReportFilters } from "../lib/reports";
 import { downloadExcel, type ExcelSheet } from "../lib/excel";
 import { useAuth } from "./AuthGate";
@@ -16,9 +18,10 @@ const previousDate = (date: string) => {
 };
 export default function Reports() {
   const { profile } = useAuth();
+  const {catalog,plots,varieties}=useCatalog();
   const [data, setData] = useState<ReportData | null>(null), [loading, setLoading] = useState(true), [error, setError] = useState("");
   const [filters, setFilters] = useState<ReportFilters>(emptyFilters);
-  const [tab, setTab] = useState<"balances" | "prices" | "season">("balances");
+  const [tab, setTab] = useState<"balances" | "prices" | "season" | "loss" | "yield">("balances");
   const [season, setSeason] = useState("all");
   const load = useCallback(async () => {
     setLoading(true); setError("");
@@ -44,6 +47,7 @@ export default function Reports() {
   const prices = groupReport(rows, (row) => JSON.stringify([row.shipment.trader_id, row.shipment.variety_id])).filter((row) => row.kg > 0);
   const months = groupReport(rows, (row) => row.shipment.harvest_date?.slice(0, 7) || "לא ידוע").filter((row) => row.kg > 0);
   const groups = groupReport(rows, (row) => JSON.stringify([row.shipment.plot_id, row.shipment.variety_id]));
+  const losses=data?lossReport(data,rows):[],lossGroups=groupLoss(losses),yields=yieldByPlot(rows,catalog.plots);
   const previousRows = data && filters.from && filters.to && !invalid ? buildReport(data, { ...filters, from: previousDate(filters.from), to: previousDate(filters.to) }, today) : [];
   const previous = groupReport(previousRows, () => "all")[0];
   const traderName = (id: string) => data?.traders.find((item) => String(item.id) === id)?.name || "סוחר לא משויך";
@@ -67,6 +71,8 @@ export default function Reports() {
       { name: "עונה לפי חלקה וזן", rows: [["חלקה", "זן", "מיכלים", "טרם שולמו", "נטו ק״ג", "הכנסות משויכות ₪", "עלות קטיף ₪"], ...groups.map((g) => { const [plot, variety] = JSON.parse(g.key); return [plots[plot] || "לא ידוע", varieties[variety] || "לא ידוע", ...summary(g)]; })] },
       { name: "פירוט שיווקים", rows: [["מזהה", "תאריך שיווק", "סוחר", "זן", "חלקה", "מיכלים", "שויכו לתשלום", "טרם שולמו", "ימים משיווק", "נטו ק״ג", "הכנסות משויכות ₪", "עלות קטיף ₪"], ...rows.map((r) => [r.shipment.id, r.shipment.harvest_date, traderName(r.shipment.trader_id), varieties[r.shipment.variety_id] || "לא ידוע", plots[r.shipment.plot_id] || "לא ידוע", Number(r.shipment.containers), r.paid, r.unpaid, r.age, r.kg, r.revenue / 100, r.cost === null ? null : r.cost / 100])] },
     ];
+    sheets.push({name:"משקל ופחת",rows:[["סוחר","זן","ברוטו ק״ג","משקל מיכלים ק״ג","נטו ק״ג","פחת ק״ג","פחת %","מעל הסף"],...lossGroups.map((g)=>{const[t,v]=JSON.parse(g.key);return[traderName(t),varieties[v]||"לא ידוע",g.gross,g.tare,g.net,g.loss,g.percent,g.percent!==null&&g.percent>catalog.settings.loss_warning_percent?"כן":"לא"];})]});
+    sheets.push({name:"יבול לדונם",rows:[["חלקה","דונם","מיכלים","מיכלים לדונם","נטו ששולם ק״ג","ק״ג לדונם","הכנסות משויכות ₪","הכנסות לדונם ₪","נתוני משקל חלקיים"],...yields.map((g)=>[g.name,g.area,g.containers,g.containersPerDunam,g.net,g.netPerDunam,g.revenue/100,g.revenuePerDunam===null?null:g.revenuePerDunam/100,g.partial?"כן":"לא"])]});
     downloadExcel(sheets, `avocado-report-${today}.xlsx`);
   };
   return <section className="space-y-4 text-zinc-900" aria-label="דוחות ומעקב">
@@ -88,10 +94,16 @@ export default function Reports() {
         <button type="button" disabled={loading || !data || invalid || !rows.length} className="min-h-11 rounded-lg bg-green-800 px-3 text-white disabled:opacity-50" onClick={exportReport}>ייצוא לאקסל</button>
       </div>
     </div>
-    <div className="grid grid-cols-3 gap-2" aria-label="סוג דוח">{([{ key: "balances", name: "יתרות סוחרים" }, { key: "prices", name: "מחירים ומגמות" }, { key: "season", name: "סיכום עונה" }] as const).map(({ key, name }) => <button key={key} type="button" aria-pressed={tab === key} className={`min-h-11 min-w-0 rounded-xl p-2 text-sm ${tab === key ? "bg-zinc-900 text-white" : "bg-white"}`} onClick={() => setTab(key)}>{name}</button>)}</div>
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" aria-label="סוג דוח">{([{ key: "balances", name: "יתרות סוחרים" }, { key: "prices", name: "מחירים ומגמות" }, { key: "season", name: "סיכום עונה" },{key:"loss",name:"משקל ופחת"},{key:"yield",name:"יבול לדונם"}] as const).map(({ key, name }) => <button key={key} type="button" aria-pressed={tab === key} className={`min-h-11 min-w-0 rounded-xl p-2 text-sm ${tab === key ? "bg-zinc-900 text-white" : "bg-white"}`} onClick={() => setTab(key)}>{name}</button>)}</div>
     {error && <p role="alert" className="rounded-xl bg-white p-4 text-red-700">{error}</p>}
     {status && <p role="status" className="rounded-xl bg-white p-4">{status}</p>}
     {!loading && data && !invalid && <>
+      {tab==="loss"&&<div className="space-y-3"><h3 className="text-xl font-semibold">השוואת משקל ופחת לפי סוחר וזן</h3><p className="text-xs text-zinc-600">פחת = ברוטו פחות משקל המיכלים ופחות נטו. האחוז מחושב ממשקל הפרי לאחר ניכוי המיכלים. כולל תקבולים מאושרים בלבד; בשיוך מפוצל הפחת מחולק לפי מספר המיכלים. סף הסימון: {catalog.settings.loss_warning_percent}%.</p>
+        {!lossGroups.length&&<p>אין נתוני שקילה מאושרים בסינון הנוכחי.</p>}
+        {lossGroups.map((g)=>{const[t,v]=JSON.parse(g.key);const flagged=g.loss< -0.0005||(g.percent!==null&&g.percent>catalog.settings.loss_warning_percent);return <div key={g.key} className={`rounded-xl border p-4 ${flagged?"border-amber-300 bg-amber-50":"border-zinc-200 bg-white"}`}><h4 className="font-semibold">{traderName(t)} · {varieties[v]||"לא ידוע"}</h4><p className="text-sm">ברוטו {num(g.gross)} · מיכלים {num(g.tare)} · נטו {num(g.net)} ק״ג</p><p className="font-bold">פחת {num(g.loss)} ק״ג · {g.percent===null?"—":num(g.percent)+"%"}</p>{flagged&&<p className="text-sm text-amber-900">{g.loss<0?"פער לא תקין — יש לבדוק נתונים":"מעל סף הפחת שהוגדר"}</p>}</div>;})}
+        <h4 className="font-semibold">בדיקה לפי שורת תקבול</h4>{losses.map((g)=><div key={g.id} className="rounded-xl bg-white p-3 text-sm"><p>{traderName(g.trader)} · {varieties[g.variety]} · תאריך הסוחר {dateLabel(g.date)}</p><p>פחת {num(g.loss)} ק״ג · {g.percent===null?"—":num(g.percent)+"%"}{g.percent!==null&&g.percent>catalog.settings.loss_warning_percent?" · מעל הסף":""}</p></div>)}
+      </div>}
+      {tab==="yield"&&<div className="space-y-3"><h3 className="text-xl font-semibold">השוואת יבול בין חלקות לפי שטח</h3><p className="text-xs text-zinc-600">לפי שטח החלקה הנוכחי בדונמים והסינון שנבחר. מומלץ לבחור עונה להשוואה. ק״ג והכנסות מבוססים רק על שיוכים מאושרים; כשנותרו מיכלים פתוחים, נתונים אלה חלקיים.</p>{yields.map((g)=><div key={g.id} className="rounded-xl border border-zinc-200 bg-white p-4"><h4 className="font-semibold">{g.name} · {g.area?num(g.area)+" דונם":"שטח חסר"}</h4><p className="text-sm">{num(g.containers)} מיכלים · {num(g.net)} ק״ג נטו ששולם · {money(g.revenue)}</p>{g.area?<dl className="mt-2 grid grid-cols-1 gap-2 text-sm min-[360px]:grid-cols-2"><div><dt>מיכלים לדונם</dt><dd className="font-bold">{num(g.containersPerDunam!)}</dd></div><div><dt>ק״ג ששולם לדונם</dt><dd className="font-bold">{num(g.netPerDunam!)}</dd></div><div><dt>הכנסות משויכות לדונם</dt><dd className="font-bold">{money(g.revenuePerDunam!)}</dd></div></dl>:<p className="mt-2 text-sm text-amber-900">יש להשלים שטח בהגדרות כדי לחשב נתונים לדונם.</p>}{g.partial&&<p className="mt-2 text-xs text-amber-900">נתוני המשקל וההכנסות חלקיים — טרם שולמו כל המיכלים.</p>}</div>)}</div>}
       {tab === "balances" && <div className="space-y-3">
         <h3 className="text-xl font-semibold">יתרות פתוחות לפי סוחר</h3>
         <p className="text-sm text-zinc-600">{num(total?.unpaid || 0)} מיכלים טרם שויכו לתקבול מאושר. אין אומדן כספי למיכלים שטרם תומחרו.</p>

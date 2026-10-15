@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
-import { dateLabel, plots, varieties } from "../lib/receipts";
+import { dateLabel } from "../lib/receipts";
+import { useCatalog } from "./FarmCatalog";
+import { catalogOptions } from "../lib/catalog";
 import { useAuth } from "./AuthGate";
 import Documents from "./Documents";
 
@@ -16,6 +18,7 @@ export default function ShipmentEditor({ shipment, onClose, onSaved, onDirtyChan
   onDirtyChange: (dirty: boolean) => void;
 }) {
   const { profile } = useAuth();
+  const { catalog, plots, varieties } = useCatalog();
   const dialog = useRef<HTMLDialogElement>(null);
   const [form, setForm] = useState({ date: shipment.date, variety: String(shipment.varietyId), plot: String(shipment.plotId), containers: String(shipment.containers), trader: shipment.traderId });
   const [traders, setTraders] = useState<{ id: string; name: string }[]>([]);
@@ -25,10 +28,10 @@ export default function ShipmentEditor({ shipment, onClose, onSaved, onDirtyChan
     try {
       const { data, error } = await supabase.rpc("get_shipment_traders");
       if (error) throw error;
-      setTraders((data || []).map((trader: { id: string; name: string }) => ({ ...trader, id: String(trader.id) })));
+      setTraders((data || []).map((trader: { id: string; name: string }) => ({ ...trader, id: String(trader.id),name:catalog.traders.find((e)=>e.id===String(trader.id))?.name||trader.name })).filter((trader:{id:string})=>catalog.traders.some((e)=>e.id===trader.id&&(e.active||e.id===shipment.traderId))));
     } catch { setTradersError(true); }
     finally { setLoadingTraders(false); }
-  }, []);
+  }, [catalog.traders,shipment.traderId]);
   useEffect(() => {
     const timer = window.setTimeout(() => { void loadTraders(); }, 0);
     return () => window.clearTimeout(timer);
@@ -78,6 +81,7 @@ export default function ShipmentEditor({ shipment, onClose, onSaved, onDirtyChan
         const message = cause && typeof cause === "object" && "message" in cause ? String(cause.message) : "";
         setError(message.includes("LINKED_TRADER") ? "לא ניתן לשנות סוחר בשיווק המשויך לטיוטה או לתקבול מאושר. יש לתקן או לבטל את השיוך בתקבול תחילה."
           : message.includes("INVALID_TRADER") ? "הסוחר שנבחר אינו זמין. סגור את העריכה ופתח אותה מחדש."
+          : message.includes("INACTIVE_CATALOG") ? "החלקה או הזן הוצאו משימוש. בחר ערך פעיל ורענן את הנתונים."
           : message.includes("LINKED_VARIETY") ? "לא ניתן לשנות זן בשיווק המשויך לתקבול פעיל. יש לתקן את השיוך בתקבול תחילה."
           : message.includes("BELOW_PAID_CONTAINERS") ? "לא ניתן להקטין את הכמות מתחת למספר המיכלים שכבר שויכו לתקבולים מאושרים."
           : message.includes("STALE_SHIPMENT") ? "השיווק השתנה מאז שפתחת אותו. סגור את העריכה, רענן ופתח אותו מחדש."
@@ -94,8 +98,8 @@ export default function ShipmentEditor({ shipment, onClose, onSaved, onDirtyChan
         </select></label>
         {tradersError && <p role="alert" className="text-sm text-red-700">לא ניתן לטעון סוחרים. <button type="button" onClick={() => { void loadTraders(); }} className="min-h-11 underline">נסה שוב</button></p>}
         <label className="block text-sm">תאריך שיווק<input required type="date" value={form.date} onChange={(e) => update("date", e.target.value)} className={inputClass} /></label>
-        <label className="block text-sm">זן<select value={form.variety} onChange={(e) => update("variety", e.target.value)} className={inputClass}>{Object.entries(varieties).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
-        <label className="block text-sm">חלקה<select value={form.plot} onChange={(e) => update("plot", e.target.value)} className={inputClass}>{Object.entries(plots).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
+        <label className="block text-sm">זן<select value={form.variety} onChange={(e) => update("variety", e.target.value)} className={inputClass}>{catalogOptions(catalog.varieties,String(shipment.varietyId)).map((e) => <option key={e.id} value={e.id}>{e.name}{e.active?"":" (לא פעיל)"}</option>)}</select></label>
+        <label className="block text-sm">חלקה<select value={form.plot} onChange={(e) => update("plot", e.target.value)} className={inputClass}>{catalogOptions(catalog.plots,String(shipment.plotId)).map((e) => <option key={e.id} value={e.id}>{e.name}{e.active?"":" (לא פעיל)"}</option>)}</select></label>
         <label className="block text-sm">מספר מיכלים<input required type="number" inputMode="numeric" min="1" max="1000000" step="1" value={form.containers} onChange={(e) => update("containers", e.target.value)} className={inputClass} /></label>
       </fieldset>
       <p className="text-xs text-zinc-500">שינוי תאריך או חלקה יעדכן גם את פילוח הנתונים בדשבורד. שיוכים לתקבולים נשמרים.</p>

@@ -54,6 +54,10 @@ test("Receipt SQL enforces atomic accounting, permissions and allocation limits"
       $$;
       create table public.traders (id bigint primary key, name text);
       insert into traders values (1, 'ראובן יהודה'), (2, 'סוחר אחר');
+      create table public.plots(id bigint generated always as identity primary key, plot_name text not null, dunam numeric);
+      insert into plots(plot_name,dunam) values ('כביש 70',10),('חלקה א',20),('בית העלמין',null);
+      create table public.varieties(id bigint generated always as identity primary key, variety_name text not null);
+      insert into varieties(variety_name) values ('אטינגר'),('גליל'),('הס'),('פוארטה');
       create table public.harvest_events (
         id bigserial primary key, trader_id bigint references traders(id), harvest_date date,
         variety_id bigint, plot_id bigint, containers numeric, container_size text, picking_cost numeric
@@ -82,6 +86,7 @@ test("Receipt SQL enforces atomic accounting, permissions and allocation limits"
       grant select, insert, delete on storage.objects to authenticated;`);
     await db.exec(await read("supabase/migrations/006_reports_documents.sql"));
     await db.exec(await read("supabase/migrations/007_edit_shipment_trader.sql"));
+    await db.exec(await read("supabase/migrations/008_settings_catalogs.sql"));
     const asUser = async (user, query, params = [], role = "authenticated") => {
       await db.exec(`begin; set local role ${role};`);
       try {
@@ -288,6 +293,47 @@ test("Receipt SQL enforces atomic accounting, permissions and allocation limits"
       const [audit] = await asUser(admin, "select * from audit_log where action='shipment_trader_updated' and entity_id=$1 order by id desc", [shipment.id]);
       assert.equal(audit.details.before.trader_id, 1); assert.equal(audit.details.after.trader_id, 2);
       assert.equal(audit.details.after.edit_version, 4);
+    });
+    await t.test("Settings and catalogs preserve areas, accept new IDs and enforce admin-only versioned writes", async () => {
+      const get = async (user=admin)=>(await asUser(user,"select get_farm_catalog() as data"))[0].data;
+      const initial=await get();
+      assert.equal(initial.settings.overdue_days,14);assert.equal(Number(initial.plots[0].dunam),10);
+      assert.equal(initial.varieties[1].name,"גליל");assert.equal((await get(viewer)).plots.length,3);
+      await assert.rejects(asUser("","select get_farm_catalog()",[],"anon"),/permission denied/);
+      for(const user of [worker,viewer]){
+        await assert.rejects(asUser(user,"select admin_save_farm_settings(0,30,12)"),/FORBIDDEN/);
+        await assert.rejects(asUser(user,"select admin_save_catalog('plots',null,0,'אסור',true,10)"),/FORBIDDEN/);
+        await assert.rejects(asUser(user,"update plots set dunam=999 where id=1"),/permission denied/);
+      }
+      await asUser(admin,"select admin_save_farm_settings(0,30,12.5)");
+      await assert.rejects(asUser(admin,"select admin_save_farm_settings(0,3,2)"),/STALE_SETTINGS/);
+      await assert.rejects(asUser(admin,"select admin_save_farm_settings(1,-1,2)"),/INVALID_SETTINGS/);
+      const saveEntry=async(kind,id,version,name,active=true,area=null)=>(await asUser(admin,"select admin_save_catalog($1,$2,$3,$4,$5,$6) as id",[kind,id,version,name,active,area]))[0].id;
+      await assert.rejects(saveEntry("plots",null,0,"כביש 70",true,20),/DUPLICATE_CATALOG/);
+      await assert.rejects(saveEntry("plots",null,0,"שטח שלילי",true,-2),/INVALID_CATALOG/);
+      const plot=await saveEntry("plots",null,0,"חלקה חדשה",true,12.5);
+      const variety=await saveEntry("varieties",null,0,"זן חדש");
+      const trader=await saveEntry("traders",null,0,"סוחר חדש");
+      assert.equal(plot,"4");assert.equal(variety,"5");assert.equal(trader,"3");
+      const [shipment]=await asUser(worker,"insert into harvest_events(trader_id,harvest_date,variety_id,plot_id,containers,container_size) values($1,'2026-09-11',$2,$3,2,'קטן') returning id::text as id",[trader,variety,plot]);
+      await asUser(worker,"select edit_farm_shipment_with_trader($1,0,'2026-09-11',$2,$3,2,$4)",[shipment.id,Number(variety),Number(plot),trader]);
+      const item=receipt([line({shipment:shipment.id,variety})]);item.trader_id=trader;item.version=(await save(item)).version;
+      await saveEntry("plots",plot,0,"חלקה מעודכנת",true,15);
+      await assert.rejects(saveEntry("plots",plot,0,"דריסה",true,99),/STALE_SETTINGS/);
+      await saveEntry("varieties",variety,0,"זן חדש",false);
+      item.version=(await save({...item,notes:"תיקון הערה בזן היסטורי"})).version;
+      const newReceipt=receipt([line({shipment:shipment.id,variety})]);newReceipt.trader_id=trader;
+      await assert.rejects(save(newReceipt,false),/INVALID_LINE/);
+      await assert.rejects(asUser(worker,"insert into harvest_events(trader_id,harvest_date,variety_id,plot_id,containers) values($1,'2026-09-11',$2,$3,1)",[trader,variety,plot]),/INACTIVE_CATALOG/);
+      await saveEntry("traders",trader,0,"שם סוחר מעודכן",true);
+      const report=(await asUser(admin,"select get_farm_reports() as data"))[0].data;
+      assert.equal(report.traders.find(t=>t.id===trader).name,"שם סוחר מעודכן");
+      assert.equal(Number((await get()).plots.find(p=>p.id===plot).dunam),15);
+      assert.equal(Number((await asUser(admin,"select dunam from plots where id=1"))[0].dunam),10,"Existing dunam is preserved");
+      const [legacyName]=await asUser(admin,"select plot_name from plots where id::text=$1",[plot]);assert.equal(legacyName.plot_name,"חלקה מעודכנת");
+      for(const v of (await get()).varieties.filter(v=>v.active&&v.id!=="1"))await saveEntry("varieties",v.id,v.version,v.name,false);
+      await assert.rejects(saveEntry("varieties","1",0,"אטינגר",false),/LAST_ACTIVE_CATALOG/);
+      assert.ok((await asUser(admin,"select * from audit_log where action='catalog_updated'")).length>=6);
     });
   } finally { await db.close(); }
 });

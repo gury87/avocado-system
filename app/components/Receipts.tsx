@@ -7,15 +7,19 @@ import ReceiptLineEditor from "./ReceiptLineEditor";
 import Documents from "./Documents";
 import {
   cents, dateLabel, money, newLine, newReceipt, normalizeWorkspace, paymentMethods,
-  plots, receiptError, receiptValidation, totalLineCents, varieties,
+  receiptError, receiptValidation, totalLineCents,
   type Receipt, type ReceiptWorkspace,
 } from "../lib/receipts";
+import { useCatalog } from "./FarmCatalog";
+import { catalogOptions, defaultEntry } from "../lib/catalog";
+import WeightBreakdown from "./WeightBreakdown";
 
 const inputClass = "mt-1 min-h-11 w-full min-w-0 rounded-lg border border-zinc-300 bg-white p-2 text-base";
 const statusLabels = { draft: "טיוטה", confirmed: "מאושר", cancelled: "מבוטל" };
 
 export default function Receipts({ onChanged, onDirtyChange }: { onChanged: () => void; onDirtyChange: (dirty: boolean) => void }) {
   const { profile } = useAuth();
+  const { catalog, plots, varieties } = useCatalog();
   const [workspace, setWorkspace] = useState<ReceiptWorkspace | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -115,7 +119,7 @@ export default function Receipts({ onChanged, onDirtyChange }: { onChanged: () =
   return <section className="space-y-4 text-zinc-900">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <h2 className="text-2xl font-bold">תקבולים</h2>
-      <button type="button" disabled={busy || loading || !workspace} onClick={() => open(newReceipt())} className="min-h-11 rounded-xl bg-zinc-900 px-4 text-white disabled:opacity-50">תקבול חדש</button>
+      <button type="button" disabled={busy || loading || !workspace} onClick={() => { const next=newReceipt();next.trader_id=defaultEntry(catalog.traders,"1");next.lines[0].variety_id=defaultEntry(catalog.varieties,"1");open(next); }} className="min-h-11 rounded-xl bg-zinc-900 px-4 text-white disabled:opacity-50">תקבול חדש</button>
     </div>
     {message && <p role="status" className="whitespace-pre-line rounded-xl border border-zinc-200 bg-white p-4 text-sm">{message}</p>}
     {loading && <p role="status">טוען תקבולים ושיווקים…</p>}
@@ -128,7 +132,7 @@ export default function Receipts({ onChanged, onDirtyChange }: { onChanged: () =
           <label className="block text-sm">סוחר<select required value={receipt.trader_id} className={inputClass} onChange={(e) => {
             if (receipt.lines.some((line) => line.allocations.length) && !window.confirm("שינוי הסוחר ינקה את כל השיוכים בתקבול. להמשיך?")) return;
             update({ ...receipt, trader_id: e.target.value, lines: receipt.lines.map((line) => ({ ...line, allocations: [] })) });
-          }}>{workspace.traders.map((trader) => <option key={trader.id} value={trader.id}>{trader.name}</option>)}</select></label>
+          }}>{catalogOptions(catalog.traders,original?.trader_id).map((trader) => <option key={trader.id} value={trader.id}>{trader.name}{trader.active?"":" (לא פעיל)"}</option>)}</select></label>
           <label className="block text-sm">אמצעי תשלום<select value={receipt.method} onChange={(e) => update({ ...receipt, method: e.target.value as Receipt["method"] })} className={inputClass}>{Object.entries(paymentMethods).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
           <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2">
             <label className="min-w-0 text-sm">{receipt.method === "cheque" ? "תאריך פירעון ההמחאה" : receipt.method === "bank" ? "תאריך ההעברה" : "תאריך קבלת המזומן"}<input required type="date" value={receipt.payment_date} onChange={(e) => update({
@@ -146,7 +150,7 @@ export default function Receipts({ onChanged, onDirtyChange }: { onChanged: () =
         {receipt.lines.map((line, index) => <ReceiptLineEditor key={line.id} receipt={receipt} line={line} position={index + 1} workspace={workspace} original={original}
           onChange={(next) => update({ ...receipt, lines: receipt.lines.map((item) => item.id === line.id ? next : item) })}
           onRemove={() => update({ ...receipt, lines: receipt.lines.filter((item) => item.id !== line.id) })} />)}
-        <button type="button" disabled={receipt.lines.length >= 100} onClick={() => update({ ...receipt, lines: [...receipt.lines, newLine()] })} className="min-h-11 w-full rounded-xl border border-zinc-300 bg-white p-3">הוסף שורת פירוט</button>
+        <button type="button" disabled={receipt.lines.length >= 100} onClick={() => update({ ...receipt, lines: [...receipt.lines, {...newLine(),variety_id:defaultEntry(catalog.varieties,"1")}] })} className="min-h-11 w-full rounded-xl border border-zinc-300 bg-white p-3">הוסף שורת פירוט</button>
         <div className="space-y-2 rounded-2xl border border-zinc-200 bg-white p-4 text-sm">
           <h3 className="font-semibold">סיכום לפני שמירה</h3>
           <p>סכום שורות הפירוט: {money(totalLineCents(receipt))}</p>
@@ -191,6 +195,7 @@ export default function Receipts({ onChanged, onDirtyChange }: { onChanged: () =
             <p className="font-medium">שורה {index + 1} · {dateLabel(line.trader_date)} · {varieties[line.variety_id]}</p>
             <p>{line.containers} מיכלים · ברוטו {line.gross_weight} ק״ג · נטו {line.net_weight} ק״ג</p>
             <p>משקל מיכל {line.tare_weight} ק״ג · מחיר לק״ג ₪{line.price_per_kg} · סכום {money(cents(line.amount))}</p>
+            <WeightBreakdown line={line}/>
             {line.allocations.map((allocation) => {
               const shipment = workspace.shipments.find((record) => record.id === allocation.harvest_event_id);
               return <p key={allocation.harvest_event_id} className="text-xs text-zinc-600">שיווק {shipment ? `${dateLabel(shipment.harvest_date)} · ${plots[shipment.plot_id] || "חלקה לא ידועה"}` : allocation.harvest_event_id}: {allocation.containers} מיכלים · {allocation.net_weight} ק״ג נטו</p>;

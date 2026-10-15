@@ -67,6 +67,10 @@ try {
   const profile = () => ({ id: userId(), full_name: "משתמש בדיקה", email: "test@example.com", role, is_active: true, joined_at: "2026-10-15T00:00:00Z" });
   const user = () => ({ id: userId(), email: "test@example.com", role: "authenticated", aud: "authenticated", app_metadata: {}, user_metadata: {}, created_at: "2026-10-15T00:00:00Z" });
   const workspace = { traders: [{ id: "1", name: "ראובן יהודה" }], shipments: [{ id: "1", trader_id: "1", variety_id: "2", plot_id: "1", harvest_date: "2026-09-06", containers: 2, used_containers: 0 }], receipts: [] };
+  const catalog = {settings:{overdue_days:14,loss_warning_percent:10,version:0},
+    plots:[{id:"1",name:"כביש 70",dunam:10},{id:"2",name:"חלקה א",dunam:20},{id:"3",name:"בית העלמין",dunam:null}].map(e=>({...e,active:true,version:0})),
+    traders:[{id:"1",name:"ראובן יהודה"},{id:"2",name:"סוחר נוסף"}].map(e=>({...e,active:true,version:0})),
+    varieties:[{id:"1",name:"אטינגר"},{id:"2",name:"גליל"},{id:"3",name:"הס"},{id:"4",name:"פוארטה"}].map(e=>({...e,active:true,version:0}))};
   const paidWeights = () => {
     const allocations = workspace.receipts.filter((item) => item.status === "confirmed").flatMap((item) => item.lines.flatMap((line) => line.allocations));
     return allocations.length ? [{ harvest_event_id: "1", containers: allocations.reduce((sum, item) => sum + Number(item.containers), 0), net_weight: allocations.reduce((sum, item) => sum + Number(item.net_weight), 0) }] : [];
@@ -95,7 +99,15 @@ try {
       if (url.pathname === "/auth/v1/user") body = user();
       else if (url.pathname === "/rest/v1/profiles") body = profile();
       else if (url.pathname === "/rest/v1/harvest_events") body = [{ ...workspace.shipments[0], id: 1, edit_version: shipmentVersion, container_size: "קטן" }];
-      else if (url.pathname.endsWith("/get_paid_shipment_weights")) body = paidWeights();
+      else if (url.pathname.endsWith("/get_farm_catalog")) body = catalog;
+      else if (url.pathname.endsWith("/admin_save_farm_settings")) {
+        assert.equal(role,"admin");const r=JSON.parse(event.request.postData);assert.equal(r.expected_version,catalog.settings.version);
+        catalog.settings={overdue_days:r.new_overdue_days,loss_warning_percent:r.new_loss_warning_percent,version:r.expected_version+1};body=null;
+      } else if (url.pathname.endsWith("/admin_save_catalog")) {
+        assert.equal(role,"admin");const r=JSON.parse(event.request.postData),list=catalog[r.kind];
+        if(r.target_id){const e=list.find(e=>e.id===r.target_id);assert.equal(e.version,r.expected_version);Object.assign(e,{name:r.new_name,active:r.new_active,version:e.version+1,...(r.kind==="plots"?{dunam:r.new_dunam}:{})});body=e.id;}
+        else {const id=String(Math.max(...list.map(e=>Number(e.id)))+1);list.push({id,name:r.new_name,active:r.new_active,version:0,...(r.kind==="plots"?{dunam:r.new_dunam}:{})});body=id;}
+      } else if (url.pathname.endsWith("/get_paid_shipment_weights")) body = paidWeights();
       else if (url.pathname.endsWith("/get_farm_reports")) {
         assert.equal(role, "admin");
         body = { ...workspace, traders: [...workspace.traders, { id: "2", name: "סוחר נוסף" }], shipments: [
@@ -133,7 +145,7 @@ try {
         body = workspace;
       } else if (url.pathname.endsWith("/get_shipment_traders")) {
         assert.ok(role === "admin" || role === "worker");
-        body = [...workspace.traders, { id: "2", name: "סוחר נוסף" }];
+        body = catalog.traders.map(e=>({id:e.id,name:e.name}));
       } else if (url.pathname.endsWith("/edit_farm_shipment_with_trader")) {
         assert.ok(role === "admin" || role === "worker");
         const request = JSON.parse(event.request.postData);
@@ -207,6 +219,7 @@ try {
   await fill("תאריך אצל הסוחר", "2026-09-07"); await fill("זן", "2");
   await fill("משקל ברוטו", "657"); await fill("מספר מיכלים", "2");
   await fill("משקל נטו", "560"); await fill("מחיר לק״ג", "1.8");
+  await waitFor(()=>evaluate("document.querySelector('[data-weight-breakdown]')?.textContent.includes('פחת: 17')"),"live weight loss calculation");
   await waitText("06/09/2026"); await click("שייך לשורה"); await waitText("שויכו 2 מתוך 2");
   await screenshot("receipt-mobile.png");
   await page("Emulation.setDeviceMetricsOverride", { width: 320, height: 844, deviceScaleFactor: 1, mobile: true });
@@ -233,6 +246,7 @@ try {
   await screenshot("dashboard-mobile-320.png");
 
   await click("שיווקים"); await waitText("רשימת שיווקים");
+  assert.equal(await evaluate("document.querySelectorAll('[data-overdue]').length"),0,"Fully paid shipment is not overdue");
   for (const width of [320, 390]) {
     await page("Emulation.setDeviceMetricsOverride", { width, height: 844, deviceScaleFactor: 1, mobile: true });
     const table = await evaluate("(() => { const t=document.querySelector('[data-shipment-list]'); return {width:t.clientWidth,content:t.scrollWidth,available:t.parentElement.clientWidth}; })()");
@@ -329,6 +343,13 @@ try {
   await click("מחירים ומגמות"); await waitText("מגמה חודשית");
   assert.ok((await text()).includes("1.80"), "Weighted price uses confirmed revenue / kg");
   await screenshot("reports-prices-mobile-320.png");
+  await click("משקל ופחת");await waitText("השוואת משקל ופחת לפי סוחר וזן");
+  assert.ok((await text()).includes("פחת 17"));
+  await screenshot("reports-loss-mobile-320.png");
+  await click("יבול לדונם");await waitText("השוואת יבול בין חלקות לפי שטח");
+  assert.ok((await text()).includes("20 דונם"));
+  assert.ok((await text()).includes("נתוני המשקל וההכנסות חלקיים"));
+  await screenshot("reports-yield-mobile-320.png");
   await click("סיכום עונה"); await waitText("פירוט לפי חלקה וזן");
   await fill("עונה", "2026");
   await waitText("השוואה לתקופה המקבילה");
@@ -347,6 +368,7 @@ try {
   }, "Excel downloaded");
   assert.equal(excel.readUInt32LE(0), 0x04034b50);
   assert.ok(excel.includes(Buffer.from("xl/worksheets/sheet6.xml")));
+  assert.ok(excel.includes(Buffer.from("xl/worksheets/sheet8.xml")));
   await fill("סוחר", "2");
   assert.ok((await text()).includes("חסרים נתוני עלות"));
   await click("יתרות סוחרים");
@@ -387,7 +409,33 @@ try {
     await click("שיווקים");
   }
 
+  await click("הגדרות המשק");await waitText("הגדרות המשק");
+  assert.equal(await evaluate("[...document.querySelectorAll('label')].find(l=>l.textContent.startsWith('סימון שיווק פתוח'))?.querySelector('input').value"),"14");
+  await fill("סימון שיווק פתוח", "30");await fill("סף סימון פחת", "2");
+  acceptDialog=false;await click("שיווקים");acceptDialog=true;
+  assert.ok((await text()).includes("שמירת פרמטרים"),"Unsaved settings navigation can be cancelled");
+  await click("שמירת פרמטרים");await waitText("הפרמטרים נשמרו");
+  assert.equal(catalog.settings.overdue_days,30);assert.equal(catalog.settings.loss_warning_percent,2);
+  await click("דוחות ומעקב");await waitText("יתרות פתוחות לפי סוחר");await click("משקל ופחת");await waitText("מעל סף הפחת שהוגדר");
+  await click("הגדרות המשק");await waitText("שמירת פרמטרים");
+  await click("הוספת חלקה");await fill("שם","חלקת בדיקה");await fill("שטח בדונם","12.5");await click("שמירת רשומה");await waitText("הרשומה נשמרה");
+  assert.equal(catalog.plots.at(-1).dunam,12.5);
+  await evaluate("document.querySelector('button[aria-label=\"ערוך חלקת בדיקה\"]').click()");
+  await fill("שם","חלקת בדיקה מעודכנת");await click("שמירת רשומה");await waitFor(()=>evaluate("!!document.querySelector('button[aria-label=\"ערוך חלקת בדיקה מעודכנת\"]')"),"plot renamed");
+  await click("זנים");await click("הוספת זן");await fill("שם","זן בדיקה");await click("שמירת רשומה");await waitText("הרשומה נשמרה");
+  await click("סוחרים");await click("הוספת סוחר");await fill("שם","סוחר בדיקה");await click("שמירת רשומה");await waitText("הרשומה נשמרה");
+  await screenshot("settings-mobile-320.png");
+  await click("ראשי");await waitText("שיווק חדש");
+  assert.ok(await evaluate("[...document.querySelectorAll('option')].some(e=>e.textContent==='זן בדיקה')"),"New varieties are available in shipment entry");
+  assert.ok(await evaluate("[...document.querySelectorAll('option')].some(e=>e.textContent==='חלקת בדיקה מעודכנת')"),"Plot names come from the managed catalog");
+  await click("הגדרות המשק");await click("חלקות");
+  await evaluate("document.querySelector('button[aria-label=\"ערוך חלקת בדיקה מעודכנת\"]').click()");
+  await evaluate("document.querySelector('input[type=checkbox]').click()");await click("שמירת רשומה");await waitText("הרשומה נשמרה");
+  await fill("סימון שיווק פתוח","14");await click("שמירת פרמטרים");await waitText("הפרמטרים נשמרו");
+  await click("ראשי");await waitText("שיווק חדש");
+  assert.equal(await evaluate("[...document.querySelectorAll('option')].some(e=>e.textContent==='חלקת בדיקה מעודכנת')"),false,"Inactive plots are excluded from new entries");
   role = "worker"; await seedSession(); await page("Page.navigate", { url: origin }); await waitText("עובד");
+  assert.equal(await evaluate("[...document.querySelectorAll('button')].some(b=>b.textContent==='הגדרות המשק')"),false);
   assert.equal(await evaluate("[...document.querySelectorAll('button')].some(item=>item.textContent==='דוחות ומעקב')"), false);
   await click("שיווקים"); await waitText("רשימת שיווקים"); await evaluate("document.querySelector('button[aria-label^=\"ערוך שיווק\"]').click()");
   await fill("מספר מיכלים", "3");
@@ -395,6 +443,7 @@ try {
   await click("שמור שינויים");
   await waitFor(() => evaluate("!document.querySelector('dialog[open]')"), "worker edit saved");
   assert.equal(shipmentVersion, 2);
+  assert.ok(await evaluate("!!document.querySelector('[data-overdue]')"),"Partially paid shipment older than threshold is marked");
   workspace.receipts.forEach((r) => { r.status = "cancelled"; });
   await evaluate("document.querySelector('button[aria-label^=\"ערוך שיווק\"]').click()");
   await waitFor(() => evaluate("[...document.querySelectorAll('label')].find(l=>l.textContent.startsWith('סוחר'))?.querySelector('select')?.options.length>=3"), "worker trader options");
