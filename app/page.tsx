@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { supabase } from "./lib/supabase";
+import Dashboard from "./components/Dashboard";
+import AuthGate, { useAuth } from "./components/AuthGate";
 
 const today = new Date().toISOString().split("T")[0];
 
@@ -16,6 +18,13 @@ type Shipment = {
 };
 
 export default function Home() {
+  return <AuthGate><FarmApp /></AuthGate>;
+}
+
+function FarmApp() {
+  const { profile } = useAuth();
+  const canCreate = profile.role === "admin" || profile.role === "worker";
+  const canDelete = profile.role === "admin";
   const [activeTab, setActiveTab] = useState<
     "dashboard" | "shipments" | "shipment-list"
   >("shipments");
@@ -29,7 +38,6 @@ export default function Home() {
     variety: "",
     plot: "",
     containers: "",
-    size: "",
     fromDate: "",
     toDate: "",
   });
@@ -41,7 +49,6 @@ export default function Home() {
     (!listFilters.variety || shipment.variety === listFilters.variety) &&
     (!listFilters.plot || shipment.plot === listFilters.plot) &&
     (!listFilters.containers || shipment.containers === Number(listFilters.containers)) &&
-    (!listFilters.size || shipment.size === listFilters.size) &&
     (!listFilters.fromDate || shipment.date >= listFilters.fromDate) &&
     (!listFilters.toDate || shipment.date <= listFilters.toDate)
   );
@@ -49,7 +56,6 @@ export default function Home() {
     { key: "variety", label: "זן" },
     { key: "plot", label: "חלקה" },
     { key: "containers", label: "מיכלים" },
-    { key: "size", label: "גודל" },
   ] as const;
   const varietyOptions = [...new Set(shipments.map((shipment) => shipment.variety))]
     .filter(Boolean)
@@ -72,12 +78,11 @@ export default function Home() {
     variety: "אטינגר",
     plot: "בית העלמין",
     containers: 1,
-    size: "קטן",
     picker: "נביל",
   });
 
   // Reusable function to load shipments from Supabase
-  const loadShipments = async () => {
+  const loadShipments = useCallback(async () => {
     const { data, error } = await supabase
       .from("harvest_events")
       .select("*")
@@ -116,15 +121,18 @@ export default function Home() {
     }));
   
     setShipments(mappedShipments);
-  };
+  }, []);
 
   // Load shipments on page load
   useEffect(() => {
-    loadShipments();
-  }, []);
+    // Defer the async load to avoid synchronous state updates inside an effect.
+    const timer = window.setTimeout(() => { void loadShipments(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadShipments]);
 
   const addShipment = async () => {
-    const pickingCost = form.containers * (form.size === "קטן" ? 130 : 150);
+    if (!canCreate) return;
+    const pickingCost = form.containers * 130;
     const confirmationMessage = [
       "האם לשמור את השיווק הבא?",
       "",
@@ -158,7 +166,7 @@ export default function Home() {
       plot_id: plotMapping[form.plot],
       picker_id: 1,
       containers: form.containers,
-      container_size: form.size,
+      container_size: "קטן",
       picking_cost: pickingCost,
       status: "pending",
     };
@@ -182,13 +190,13 @@ export default function Home() {
         variety: "אטינגר",
         plot: "בית העלמין",
         containers: 1,
-        size: "קטן",
         picker: "נביל",
       });
     }
   };
 
   const deleteShipment = async (shipment: Shipment) => {
+    if (!canDelete) return;
     if (deletingId !== null) return;
 
     const confirmationMessage = [
@@ -224,19 +232,6 @@ export default function Home() {
       setDeletingId(null);
     }
   };
-
-  const totalContainers = shipments.reduce(
-    (sum, s) => sum + s.containers,
-    0
-  );
-
-  const totalPickingCost = shipments.reduce(
-    (sum, s) =>
-      sum +
-      s.containers *
-        (s.size === "גדול" ? 150 : 130),
-    0
-  );
 
   return (
     <main
@@ -284,45 +279,7 @@ export default function Home() {
         </div>
 
         {activeTab === "dashboard" && (
-          <>
-            <div className="grid grid-cols-2 gap-3 mb-4">
-              <div className="bg-white rounded-2xl border border-zinc-200 p-4">
-                <div className="text-sm text-zinc-500">
-                  סה״כ מיכלים
-                </div>
-                <div className="text-3xl font-bold text-zinc-900">
-                  {totalContainers}
-                </div>
-              </div>
-
-              <div className="bg-white rounded-2xl border border-zinc-200 p-4">
-                <div className="text-sm text-zinc-500">
-                  מספר שיווקים
-                </div>
-                <div className="text-3xl font-bold text-zinc-900">
-                  {shipments.length}
-                </div>
-              </div>
-
-              <div className="bg-white rounded-2xl border border-zinc-200 p-4">
-                <div className="text-sm text-zinc-500">
-                  עלות קטיף
-                </div>
-                <div className="text-2xl font-bold text-zinc-900">
-                  ₪{totalPickingCost}
-                </div>
-              </div>
-
-              <div className="bg-white rounded-2xl border border-zinc-200 p-4">
-                <div className="text-sm text-zinc-500">
-                  קוטף ראשי
-                </div>
-                <div className="text-xl font-bold text-zinc-900">
-                  נביל
-                </div>
-              </div>
-            </div>
-          </>
+          <Dashboard shipments={shipments} />
         )}
 
         {activeTab === "shipment-list" && (
@@ -359,7 +316,7 @@ export default function Home() {
               )}
               <button
                 type="button"
-                onClick={() => setListFilters({ variety: "", plot: "", containers: "", size: "", fromDate: "", toDate: "" })}
+                onClick={() => setListFilters({ variety: "", plot: "", containers: "", fromDate: "", toDate: "" })}
                 className="min-h-11 rounded-lg border border-zinc-300 px-3"
               >
                 נקה סינון
@@ -392,7 +349,7 @@ export default function Home() {
                         </select>
                       </th>
                     ))}
-                    <th scope="col" className="px-1 py-2"><span className="sr-only">מחיקה</span></th>
+                    {canDelete && <th scope="col" className="px-1 py-2"><span className="sr-only">מחיקה</span></th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-100">
@@ -404,8 +361,7 @@ export default function Home() {
                       <td className="px-2 py-2">{shipment.variety}</td>
                       <td className="px-2 py-2">{shipment.plot}</td>
                       <td className="px-2 py-2">{shipment.containers}</td>
-                      <td className="px-2 py-2">{shipment.size}</td>
-                      <td className="px-1 py-2">
+                      {canDelete && <td className="px-1 py-2">
                         <button
                           type="button"
                           onClick={() => deleteShipment(shipment)}
@@ -415,11 +371,11 @@ export default function Home() {
                         >
                           <span aria-hidden="true" className="text-sm font-bold">✕</span>
                         </button>
-                      </td>
+                      </td>}
                     </tr>
                   ))}
                   {listShipments.length === 0 && (
-                    <tr><td colSpan={6} className="p-4 text-center text-zinc-500">אין שיווקים התואמים לסינון</td></tr>
+                    <tr><td colSpan={canDelete ? 5 : 4} className="p-4 text-center text-zinc-500">אין שיווקים התואמים לסינון</td></tr>
                   )}
                 </tbody>
               </table>
@@ -432,7 +388,7 @@ export default function Home() {
 
         {activeTab === "shipments" && (
           <>
-            <div className="bg-white rounded-2xl border border-zinc-200 p-5 mb-4">
+            {canCreate && <div className="bg-white rounded-2xl border border-zinc-200 p-5 mb-4">
               <h2 className="text-xl font-semibold text-zinc-900 mb-3">
                 שיווק חדש
               </h2>
@@ -494,20 +450,6 @@ export default function Home() {
                   className="w-full rounded-xl border border-zinc-300 p-3 text-zinc-900"
                 />
 
-                <select
-                  value={form.size}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      size: e.target.value,
-                    })
-                  }
-                  className="w-full rounded-xl border border-zinc-300 p-3 text-zinc-900"
-                >
-                  <option>קטן</option>
-                  <option>גדול</option>
-                </select>
-
                 <button
                   onClick={addShipment}
                   className="w-full bg-zinc-900 text-white rounded-xl py-3"
@@ -515,7 +457,7 @@ export default function Home() {
                   שמור שיווק
                 </button>
               </div>
-            </div>
+            </div>}
 
             <section className="bg-white rounded-2xl border border-zinc-200 overflow-hidden">
               <div className="flex flex-wrap items-center justify-between gap-3 p-4">
@@ -573,7 +515,6 @@ export default function Home() {
                         </select>
                       </th>
                       <th scope="col" className="px-3 py-2">מיכלים</th>
-                      <th scope="col" className="px-3 py-2">גודל</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-100">
@@ -587,12 +528,11 @@ export default function Home() {
                         <td className="px-3 py-3">{shipment.variety}</td>
                         <td className="px-3 py-3">{shipment.plot}</td>
                         <td className="px-3 py-3">{shipment.containers}</td>
-                        <td className="px-3 py-3">{shipment.size}</td>
                       </tr>
                     ))}
                     {visibleShipments.length === 0 && (
                       <tr>
-                        <td colSpan={5} className="p-4 text-center text-zinc-500">
+                        <td colSpan={4} className="p-4 text-center text-zinc-500">
                           אין שיווקים להצגה
                         </td>
                       </tr>

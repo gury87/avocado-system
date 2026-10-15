@@ -1,4 +1,8 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+מערכת ניהול מטעי אבוקדו — Next.js, React ו־Supabase.
+
+הפעלת התחברות, חשבון מנהל ראשון, הזמנות והרשאות: [AUTH_SETUP.md](./AUTH_SETUP.md).
+
+בדיקות הרשאות מסד נתונים: `npm run test:auth` (PostgreSQL מקומי דרך PGlite, ללא שינוי מסד הנתונים האמיתי).
 
 ## Getting Started
 
