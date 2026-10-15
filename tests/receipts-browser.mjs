@@ -345,6 +345,7 @@ try {
   await screenshot("reports-prices-mobile-320.png");
   await click("משקל ופחת");await waitText("השוואת משקל ופחת לפי סוחר וזן");
   assert.ok((await text()).includes("פחת 17"));
+  await waitText("תאריך הסוחר: 07/09/2026");await waitText("תאריך שיווק: 05/09/2026");await waitText("פער: 2 ימים");
   await screenshot("reports-loss-mobile-320.png");
   await click("יבול לדונם");await waitText("השוואת יבול בין חלקות לפי שטח");
   assert.ok((await text()).includes("20 דונם"));
@@ -417,6 +418,8 @@ try {
   await click("שמירת פרמטרים");await waitText("הפרמטרים נשמרו");
   assert.equal(catalog.settings.overdue_days,30);assert.equal(catalog.settings.loss_warning_percent,2);
   await click("דוחות ומעקב");await waitText("יתרות פתוחות לפי סוחר");await click("משקל ופחת");await waitText("מעל סף הפחת שהוגדר");
+  assert.equal(await evaluate("document.querySelectorAll('[data-loss-line][data-loss-warning]').length"),1,"Above-threshold receipt line is highlighted");
+  assert.equal(await evaluate("[...document.querySelectorAll('[data-loss-group]')].some(e=>e.classList.contains('bg-amber-50')||e.textContent.includes('מעל סף'))"),false,"Trader/variety aggregates remain neutral");
   await click("הגדרות המשק");await waitText("שמירת פרמטרים");
   await click("הוספת חלקה");await fill("שם","חלקת בדיקה");await fill("שטח בדונם","12.5");await click("שמירת רשומה");await waitText("הרשומה נשמרה");
   assert.equal(catalog.plots.at(-1).dunam,12.5);

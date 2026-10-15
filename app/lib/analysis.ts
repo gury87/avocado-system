@@ -9,15 +9,23 @@ export function weightBreakdown(line: Pick<ReceiptLine,"gross_weight"|"container
   const fruitGross=gross-tare, loss=fruitGross-net;
   return {gross,tare,net,fruitGross,loss,percent:fruitGross>0?loss/fruitGross*100:null,invalid:loss < -0.0005||fruitGross<=0};
 }
-export type LossRow={id:string;receiptId:string;trader:string;variety:string;date:string;gross:number;tare:number;net:number;loss:number;fruitGross:number;percent:number|null};
+export function shipmentDateGap(shipmentDate:string,traderDate:string):number|null{
+  if(!shipmentDate||!traderDate)return null;
+  const days=(Date.parse(traderDate+"T00:00:00Z")-Date.parse(shipmentDate+"T00:00:00Z"))/86400000;
+  return Number.isFinite(days)?Math.round(days):null;
+}
+export type LossRow={id:string;receiptId:string;trader:string;variety:string;date:string;shipments:{id:string;date:string;days:number|null}[];gross:number;tare:number;net:number;loss:number;fruitGross:number;percent:number|null};
 export function lossReport(data:ReportData,rows:ReportRow[]):LossRow[]{
   const selected=new Set(rows.map((r)=>r.shipment.id));
+  const shipments=new Map(rows.map((r)=>[r.shipment.id,r.shipment]));
   return data.receipts.filter((r)=>r.status==="confirmed").flatMap((receipt)=>receipt.lines.flatMap((line)=>{
     const base=weightBreakdown(line); if(!base)return [];
     const allocations=line.allocations.filter((a)=>selected.has(a.harvest_event_id));if(!allocations.length)return [];
     const containers=allocations.reduce((s,a)=>s+Number(a.containers),0),net=allocations.reduce((s,a)=>s+Number(a.net_weight),0);
     const share=containers/Number(line.containers),tare=containers*Number(line.tare_weight),loss=base.loss*share,fruitGross=net+loss;
-    return [{id:receipt.id+":"+line.id,receiptId:receipt.id,trader:receipt.trader_id,variety:line.variety_id,date:line.trader_date,gross:fruitGross+tare,tare,net,loss,fruitGross,percent:fruitGross>0?loss/fruitGross*100:null}];
+    return [{id:receipt.id+":"+line.id,receiptId:receipt.id,trader:receipt.trader_id,variety:line.variety_id,date:line.trader_date,
+      shipments:allocations.map((a)=>{const date=shipments.get(a.harvest_event_id)?.harvest_date||"";return{id:a.harvest_event_id,date,days:shipmentDateGap(date,line.trader_date)};}),
+      gross:fruitGross+tare,tare,net,loss,fruitGross,percent:fruitGross>0?loss/fruitGross*100:null}];
   }));
 }
 export function groupLoss(rows:LossRow[]){
