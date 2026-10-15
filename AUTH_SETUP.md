@@ -25,7 +25,7 @@ APP_URL=https://avocado-system-theta.vercel.app
 - להוסיף לרשימת Redirect URLs את `https://avocado-system-theta.vercel.app/**` ואת `http://localhost:3000/**` (ואת כתובות ה־Preview המורשות, אם יש).
 - להשתמש בתבניות Invite ו־Reset Password המפנות ל־`{{ .ConfirmationURL }}`. בסיום אימות הקישור Supabase יחזיר את המשתמש ל־`/?auth=setup` או `/?auth=recovery` עם session; הלקוח מטפל בו ומציג הגדרת סיסמה.
 - להגדיר SMTP לשליחת הזמנות למשתמשים אמיתיים. שירות האימייל המובנה עשוי להגביל נמענים וקצב שליחה.
-- מומלץ להגדיר דרישת סיסמה של לפחות 12 תווים גם בהגדרות Auth.
+- להגדיר דרישת סיסמה של לפחות 6 תווים גם בהגדרות Auth, בהתאם למינימום בממשק.
 
 ## 3. הכנת מנהל ראשון — לפני סגירת הגישה הציבורית
 

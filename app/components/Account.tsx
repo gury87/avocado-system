@@ -31,7 +31,7 @@ export default function Account({ setup = false, onComplete }: { setup?: boolean
   return <form className="space-y-4 rounded-2xl bg-white p-4 text-zinc-900" onSubmit={async (event) => {
     event.preventDefault();
     if (busy || !ready) return;
-    if (password && (password.length < 12 || password !== confirmation)) { setMessage("יש להזין סיסמה של לפחות 12 תווים ולוודא שהסיסמאות זהות."); return; }
+    if (password && (password.length < 6 || password !== confirmation)) { setMessage("יש להזין סיסמה של לפחות 6 תווים ולוודא שהסיסמאות זהות."); return; }
     setBusy(true); setMessage("");
     try {
       if (password) {
@@ -48,8 +48,8 @@ export default function Account({ setup = false, onComplete }: { setup?: boolean
     <h2 className="text-xl font-semibold">{setup ? "הגדרת החשבון והסיסמה" : "החשבון שלי"}</h2>
     <p className="break-all text-sm text-zinc-600" dir="ltr">{email}</p>
     <label className="block text-sm">שם מלא<input required maxLength={100} autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} className={inputClass} /></label>
-    <label className="block text-sm">{setup ? "סיסמה" : "סיסמה חדשה (רשות)"}<input type="password" required={setup} minLength={12} autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} className={inputClass} /></label>
-    <p className="text-xs text-zinc-500">לפחות 12 תווים.</p>
+    <label className="block text-sm">{setup ? "סיסמה" : "סיסמה חדשה (רשות)"}<input type="password" required={setup} minLength={6} autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} className={inputClass} /></label>
+    <p className="text-xs text-zinc-500">לפחות 6 תווים.</p>
     <label className="block text-sm">אימות סיסמה<input type="password" required={setup || Boolean(password)} autoComplete="new-password" value={confirmation} onChange={(e) => setConfirmation(e.target.value)} className={inputClass} /></label>
     {message && <p role="status" className="text-sm">{message}</p>}
     <button disabled={busy || !ready} className="min-h-11 w-full rounded-xl bg-zinc-900 p-3 text-white disabled:opacity-50">{busy ? "שומר…" : "שמירת פרטים"}</button>
