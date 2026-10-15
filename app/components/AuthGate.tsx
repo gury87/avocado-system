@@ -1,13 +1,13 @@
 "use client";
 
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 import { roleLabels, type Profile } from "../lib/auth-types";
 import Account from "./Account";
 import UserManagement from "./UserManagement";
 
-const AuthContext = createContext<{ profile: Profile; refresh: () => Promise<void> } | null>(null);
+const AuthContext = createContext<{ profile: Profile; refresh: () => Promise<void>; setUnsavedChanges: (dirty: boolean) => void } | null>(null);
 export function useAuth() {
   const value = useContext(AuthContext);
   if (!value) throw new Error("Auth provider missing");
@@ -23,6 +23,14 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   const [screen, setScreen] = useState<"app" | "account" | "users">("app");
   const generation = useRef(0);
   const currentIdentity = useRef<string | null>(null);
+  const unsavedChanges = useRef(false);
+  const setUnsavedChanges = useCallback((dirty: boolean) => { unsavedChanges.current = dirty; }, []);
+  const canLeave = () => !unsavedChanges.current || window.confirm("יש שינויים שלא נשמרו. לעזוב אותם?");
+  const navigate = (next: typeof screen) => {
+    if (next === screen || !canLeave()) return;
+    unsavedChanges.current = false;
+    setScreen(next);
+  };
 
   useEffect(() => {
     let alive = true;
@@ -132,16 +140,17 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   }} /></AuthFrame>;
 
   return (
-    <AuthContext.Provider value={{ profile, refresh }}>
+    <AuthContext.Provider value={{ profile, refresh, setUnsavedChanges }}>
       <div dir="rtl" className="min-h-screen bg-zinc-100 text-zinc-900">
         <header className="border-b border-zinc-200 bg-white">
           <div className="mx-auto max-w-md space-y-2 px-4 py-3">
             <p className="break-words text-sm">{profile.full_name || profile.email} · {roleLabels[profile.role]}</p>
             <nav className="flex flex-wrap gap-x-4 gap-y-1 text-sm" aria-label="חשבון משתמש">
-              <button className="min-h-11" onClick={() => setScreen("app")}>המערכת</button>
-              <button className="min-h-11" onClick={() => setScreen("account")}>החשבון שלי</button>
-              {profile.role === "admin" && <button className="min-h-11" onClick={() => setScreen("users")}>ניהול משתמשים</button>}
+              <button className="min-h-11" onClick={() => navigate("app")}>המערכת</button>
+              <button className="min-h-11" onClick={() => navigate("account")}>החשבון שלי</button>
+              {profile.role === "admin" && <button className="min-h-11" onClick={() => navigate("users")}>ניהול משתמשים</button>}
               <button className="min-h-11 text-red-700" onClick={async () => {
+                if (!canLeave()) return;
                 const { error: signOutError } = await supabase.auth.signOut();
                 if (signOutError) window.alert("היציאה נכשלה. נסה שוב.");
               }}>יציאה</button>

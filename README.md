@@ -2,6 +2,8 @@
 
 הפעלת התחברות, חשבון מנהל ראשון, הזמנות והרשאות: [AUTH_SETUP.md](./AUTH_SETUP.md).
 
+הפעלת מסך התקבולים ויצירת טבלאות ופונקציות ב־Supabase: [RECEIPTS_SETUP.md](./RECEIPTS_SETUP.md).
+
 בדיקות הרשאות מסד נתונים: `npm run test:auth` (PostgreSQL מקומי דרך PGlite, ללא שינוי מסד הנתונים האמיתי).
 
 ## Getting Started

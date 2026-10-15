@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:auth": "node --test tests/auth-permissions.test.mjs"
+    "test:auth": "node --test tests/auth-permissions.test.mjs",
+    "test:receipts": "node --experimental-strip-types --test tests/receipts.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.3",

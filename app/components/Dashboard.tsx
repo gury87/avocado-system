@@ -1,15 +1,17 @@
 "use client";
 
 import { useState } from "react";
+import type { PaidWeight } from "../lib/receipts";
 
 type Shipment = {
+  id: string;
   date: string;
   plot: string;
   variety: string;
   containers: number;
 };
 
-export default function Dashboard({ shipments }: { shipments: Shipment[] }) {
+export default function Dashboard({ shipments, paidWeights, weightsError }: { shipments: Shipment[]; paidWeights: PaidWeight[] | null; weightsError: boolean }) {
   const [filters, setFilters] = useState({ from: "", to: "", plot: "", variety: "" });
   const [groupBy, setGroupBy] = useState<"plot" | "variety" | "both">("plot");
   const invalidRange = Boolean(filters.from && filters.to && filters.from > filters.to);
@@ -21,14 +23,24 @@ export default function Dashboard({ shipments }: { shipments: Shipment[] }) {
     (!filters.variety || shipment.variety === filters.variety)
   );
   const total = filtered.reduce((sum, shipment) => sum + shipment.containers, 0);
-  const groups = new Map<string, { plot: string; variety: string; containers: number }>();
+  const weightById = new Map(paidWeights?.map((item) => [item.harvest_event_id, item]) || []);
+  const paidKg = filtered.reduce((sum, shipment) => sum + (weightById.get(shipment.id)?.net_weight || 0), 0);
+  const paidContainers = filtered.reduce((sum, shipment) => sum + (weightById.get(shipment.id)?.containers || 0), 0);
+  const weightAvailable = paidWeights !== null && !weightsError;
+  const partialWeight = paidContainers + 0.0005 < total;
+  const kgLabel = (value: number) => value.toLocaleString("he-IL", { maximumFractionDigits: 3 });
+  const groups = new Map<string, { plot: string; variety: string; containers: number; kg: number; paidContainers: number }>();
   for (const shipment of filtered) {
     const plot = groupBy === "variety" ? "" : shipment.plot;
     const variety = groupBy === "plot" ? "" : shipment.variety;
     const key = JSON.stringify([plot, variety]);
     const existing = groups.get(key);
-    if (existing) existing.containers += shipment.containers;
-    else groups.set(key, { plot, variety, containers: shipment.containers });
+    const paid = weightById.get(shipment.id);
+    if (existing) {
+      existing.containers += shipment.containers;
+      existing.kg += paid?.net_weight || 0;
+      existing.paidContainers += paid?.containers || 0;
+    } else groups.set(key, { plot, variety, containers: shipment.containers, kg: paid?.net_weight || 0, paidContainers: paid?.containers || 0 });
   }
   const rows = [...groups.entries()].sort(([, a], [, b]) =>
     a.plot.localeCompare(b.plot, "he") || a.variety.localeCompare(b.variety, "he")
@@ -76,8 +88,10 @@ export default function Dashboard({ shipments }: { shipments: Shipment[] }) {
           <p className="mt-1 text-xs text-zinc-500">{filtered.length} שיווקים בסינון הנוכחי</p>
         </div>
         <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-          <h2 className="text-sm text-zinc-500">סה״כ ק״ג ששווקו</h2>
-          <p className="mt-2 text-sm text-zinc-600">נתוני משקל טרם זמינים</p>
+          <h2 className="text-sm text-zinc-500">משקל נטו ששולם (ק״ג)</h2>
+          {weightAvailable && paidContainers > 0 && !invalidRange
+            ? <><p className="mt-2 break-words text-3xl font-bold">{kgLabel(paidKg)}</p><p className="mt-1 text-xs text-zinc-500">{partialWeight ? "נתון חלקי · " : ""}{kgLabel(paidContainers)} מתוך {kgLabel(total)} מיכלים שולמו</p></>
+            : <p className="mt-2 text-sm text-zinc-600">{weightsError ? "לא ניתן לטעון את נתוני המשקל" : invalidRange ? "יש לתקן את טווח התאריכים" : !weightAvailable ? "טוען נתוני משקל…" : "נתוני משקל טרם זמינים"}</p>}
         </div>
       </div>
 
@@ -99,7 +113,7 @@ export default function Dashboard({ shipments }: { shipments: Shipment[] }) {
                 {groupBy !== "variety" && <th scope="col" className="px-3 py-3">חלקה</th>}
                 {groupBy !== "plot" && <th scope="col" className="px-3 py-3">זן</th>}
                 <th scope="col" className="px-3 py-3">מיכלים</th>
-                <th scope="col" className="px-3 py-3">ק״ג</th>
+                <th scope="col" className="px-3 py-3">נטו ששולם (ק״ג)</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
@@ -108,14 +122,16 @@ export default function Dashboard({ shipments }: { shipments: Shipment[] }) {
                   {groupBy !== "variety" && <td className="px-3 py-3">{row.plot || "לא ידוע"}</td>}
                   {groupBy !== "plot" && <td className="px-3 py-3">{row.variety || "לא ידוע"}</td>}
                   <td className="px-3 py-3">{row.containers.toLocaleString("he-IL")}</td>
-                  <td className="px-3 py-3 text-zinc-500"><span aria-label="נתוני משקל טרם זמינים">—</span></td>
+                  <td className="px-3 py-3">
+                    {weightAvailable && row.paidContainers > 0 ? <>{kgLabel(row.kg)}{row.paidContainers + 0.0005 < row.containers && <span className="block text-xs text-amber-800">חלקי</span>}</> : <span aria-label="נתוני משקל אינם זמינים">—</span>}
+                  </td>
                 </tr>
               ))}
               {rows.length === 0 && <tr><td colSpan={groupBy === "both" ? 4 : 3} className="p-4 text-center text-zinc-500">{invalidRange ? "יש לתקן את טווח התאריכים" : "אין שיווקים התואמים לסינון"}</td></tr>}
             </tbody>
           </table>
         </div>
-        <p className="border-t border-zinc-200 p-3 text-xs text-zinc-500">נתוני משקל טרם זמינים. הם יוצגו לאחר שילוב נתוני התשלום מהסוחר.</p>
+        <p className="border-t border-zinc-200 p-3 text-xs text-zinc-500">הנטו מבוסס על שיוכים בתקבולים מאושרים בלבד, לפי תאריך השיווק המקורי. כל עוד לא שולמו כל המיכלים, נתוני המשקל חלקיים. טיוטות ותקבולים מבוטלים אינם נכללים.</p>
       </div>
     </section>
   );

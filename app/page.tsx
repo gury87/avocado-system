@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { supabase } from "./lib/supabase";
 import Dashboard from "./components/Dashboard";
 import AuthGate, { useAuth } from "./components/AuthGate";
+import Receipts from "./components/Receipts";
+import type { PaidWeight } from "./lib/receipts";
 
 const today = new Date().toISOString().split("T")[0];
 
@@ -22,14 +24,42 @@ export default function Home() {
 }
 
 function FarmApp() {
-  const { profile } = useAuth();
+  const { profile, setUnsavedChanges } = useAuth();
   const canCreate = profile.role === "admin" || profile.role === "worker";
   const canDelete = profile.role === "admin";
   const [activeTab, setActiveTab] = useState<
-    "dashboard" | "shipments" | "shipment-list"
+    "dashboard" | "shipments" | "shipment-list" | "receipts"
   >("shipments");
 
   const [shipments, setShipments] = useState<Shipment[]>([]);
+  const [paidWeights, setPaidWeights] = useState<PaidWeight[] | null>(null);
+  const [weightsError, setWeightsError] = useState(false);
+  const [receiptsDirty, setReceiptsDirty] = useState(false);
+  const selectTab = (tab: typeof activeTab) => {
+    if (tab === activeTab) return;
+    if (receiptsDirty && !window.confirm("יש שינויים בתקבול שלא נשמרו. לעזוב אותם?")) return;
+    setReceiptsDirty(false);
+    setUnsavedChanges(false);
+    setActiveTab(tab);
+  };
+  const loadPaidWeights = useCallback(async () => {
+    try {
+      const records: PaidWeight[] = [];
+      for (let offset = 0; ; offset += 500) {
+        const { data, error } = await supabase.rpc("get_paid_shipment_weights")
+          .order("harvest_event_id", { ascending: true }).range(offset, offset + 499);
+        if (error) throw error;
+        records.push(...(data as PaidWeight[]));
+        if (data.length < 500) break;
+      }
+      setPaidWeights(records.map((item) => ({ harvest_event_id: String(item.harvest_event_id), net_weight: Number(item.net_weight), containers: Number(item.containers) })));
+      setWeightsError(false);
+    } catch {
+      setPaidWeights(null);
+      setWeightsError(true);
+    }
+  }, []);
+  useEffect(() => () => setUnsavedChanges(false), [setUnsavedChanges]);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [shipmentLimit, setShipmentLimit] = useState("5");
   const [varietyFilter, setVarietyFilter] = useState("");
@@ -83,18 +113,27 @@ function FarmApp() {
 
   // Reusable function to load shipments from Supabase
   const loadShipments = useCallback(async () => {
-    const { data, error } = await supabase
-      .from("harvest_events")
-      .select("*")
-      .order("harvest_date", { ascending: false, nullsFirst: false })
-      .order("id", { ascending: false });
+    const records: {
+      id: string | number; harvest_date: string; variety_id: number; plot_id: number;
+      containers: number; container_size: string;
+    }[] = [];
+    // Fetch all pages so the dashboard is not limited by the REST row cap.
+    for (let offset = 0; ; offset += 500) {
+      const { data, error } = await supabase
+        .from("harvest_events")
+        .select("*")
+        .order("harvest_date", { ascending: false, nullsFirst: false })
+        .order("id", { ascending: false })
+        .range(offset, offset + 499);
 
-    console.log("RAW DATA", data);
-    console.log("LOAD ERROR", error);
-  
-    if (error) {
-      console.error("Error loading shipments:", error);
-      return;
+      console.log("RAW DATA", data);
+      console.log("LOAD ERROR", error);
+      if (error) {
+        console.error("Error loading shipments:", error);
+        return;
+      }
+      records.push(...data);
+      if (data.length < 500) break;
     }
   
     const varietyMapping: Record<number, string> = {
@@ -110,12 +149,13 @@ function FarmApp() {
       3: "בית העלמין",
     };
   
-    const mappedShipments = data.map((record) => ({
-      id: record.id,
+    const uniqueRecords = [...new Map(records.map((record) => [String(record.id), record])).values()];
+    const mappedShipments = uniqueRecords.map((record) => ({
+      id: String(record.id),
       date: record.harvest_date,
       variety: varietyMapping[record.variety_id] || "",
       plot: plotMapping[record.plot_id] || "",
-      containers: record.containers,
+      containers: Number(record.containers),
       size: record.container_size, // Use the value directly from Supabase
       picker: "נביל", // Assuming picker is static for now
     }));
@@ -126,9 +166,9 @@ function FarmApp() {
   // Load shipments on page load
   useEffect(() => {
     // Defer the async load to avoid synchronous state updates inside an effect.
-    const timer = window.setTimeout(() => { void loadShipments(); }, 0);
+    const timer = window.setTimeout(() => { void loadShipments(); void loadPaidWeights(); }, 0);
     return () => window.clearTimeout(timer);
-  }, [loadShipments]);
+  }, [loadShipments, loadPaidWeights]);
 
   const addShipment = async () => {
     if (!canCreate) return;
@@ -218,9 +258,9 @@ function FarmApp() {
         .eq("id", shipment.id)
         .select("id");
 
-      if (error || !data?.some((record) => record.id === shipment.id)) {
+      if (error || !data?.some((record) => String(record.id) === shipment.id)) {
         console.error("Error deleting shipment:", error);
-        alert("השיווק לא נמחק. נסה שוב או בדוק את הרשאות המחיקה.");
+        alert(error?.code === "23503" ? "לא ניתן למחוק שיווק המשויך לתקבול, כדי לשמור את היסטוריית הנתונים." : "השיווק לא נמחק. נסה שוב או בדוק את הרשאות המחיקה.");
         return;
       }
 
@@ -243,9 +283,9 @@ function FarmApp() {
           🥑 מערכת שיווק אבוקדו
         </h1>
 
-        <div className="flex gap-2 mb-5 text-sm">
+        <div className={`grid gap-2 mb-5 text-sm ${canDelete ? "grid-cols-2 min-[400px]:grid-cols-4" : "grid-cols-3"}`}>
           <button
-            onClick={() => setActiveTab("shipments")}
+            onClick={() => selectTab("shipments")}
             className={`flex-1 rounded-xl p-3 ${
               activeTab === "shipments"
                 ? "bg-zinc-900 text-white"
@@ -256,7 +296,7 @@ function FarmApp() {
           </button>
 
           <button
-            onClick={() => setActiveTab("shipment-list")}
+            onClick={() => selectTab("shipment-list")}
             className={`flex-1 rounded-xl p-3 ${
               activeTab === "shipment-list"
                 ? "bg-zinc-900 text-white"
@@ -267,7 +307,7 @@ function FarmApp() {
           </button>
 
           <button
-            onClick={() => setActiveTab("dashboard")}
+            onClick={() => selectTab("dashboard")}
             className={`flex-1 rounded-xl p-3 ${
               activeTab === "dashboard"
                 ? "bg-zinc-900 text-white"
@@ -276,10 +316,17 @@ function FarmApp() {
           >
             דשבורד
           </button>
+          {canDelete && <button
+            onClick={() => selectTab("receipts")}
+            className={`min-h-11 rounded-xl p-3 ${activeTab === "receipts" ? "bg-zinc-900 text-white" : "bg-white text-zinc-700"}`}
+          >תקבולים</button>}
         </div>
 
         {activeTab === "dashboard" && (
-          <Dashboard shipments={shipments} />
+          <Dashboard shipments={shipments} paidWeights={paidWeights} weightsError={weightsError} />
+        )}
+        {activeTab === "receipts" && canDelete && (
+          <Receipts onChanged={() => { void loadPaidWeights(); }} onDirtyChange={(dirty) => { setReceiptsDirty(dirty); setUnsavedChanges(dirty); }} />
         )}
 
         {activeTab === "shipment-list" && (
