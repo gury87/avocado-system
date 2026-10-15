@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { Pencil } from "lucide-react";
 import { supabase } from "./lib/supabase";
 import Dashboard from "./components/Dashboard";
 import AuthGate, { useAuth } from "./components/AuthGate";
@@ -43,6 +44,7 @@ function FarmApp() {
   const toggleSort = (key: ShipmentSortKey) => setListSort((current) => ({ key, direction: current.key === key && current.direction === "asc" ? "desc" : "asc" }));
   const sortIndicator = (key: ShipmentSortKey) => listSort.key === key ? (listSort.direction === "asc" ? " ↑" : " ↓") : " ↕";
   const [paidWeights, setPaidWeights] = useState<PaidWeight[] | null>(null);
+  const paidShipmentIds = new Set((paidWeights || []).filter((item) => item.containers > 0).map((item) => item.harvest_event_id));
   const [weightsError, setWeightsError] = useState(false);
   const [receiptsDirty, setReceiptsDirty] = useState(false);
   const selectTab = (tab: typeof activeTab) => {
@@ -425,6 +427,7 @@ function FarmApp() {
                         </select>
                       </th>
                     ))}
+                    <th scope="col" className="px-1 py-2"><span className="sr-only">שיוך תשלום</span></th>
                     {canCreate && <th scope="col" className="px-1 py-2"><span className="sr-only">פעולות</span></th>}
                   </tr>
                 </thead>
@@ -437,8 +440,11 @@ function FarmApp() {
                       <td className="px-2 py-2">{shipment.variety}</td>
                       <td className="px-2 py-2">{shipment.plot}</td>
                       <td className="px-2 py-2">{shipment.containers}</td>
+                      <td className="px-1 py-2 text-center">
+                        {paidShipmentIds.has(shipment.id) && <span title="שויך תשלום מאושר לשיווק (מלא או חלקי)" className="text-lg font-bold text-green-700"><span aria-hidden="true">₪</span><span className="sr-only">שויך תשלום מאושר לשיווק (מלא או חלקי)</span></span>}
+                      </td>
                       {canCreate && <td className="px-1 py-2">
-                        <button type="button" disabled={deletingId !== null} onClick={() => setEditingShipment(shipment)} aria-label={`ערוך שיווק מתאריך ${shipment.date.split("-").reverse().join("/")}`} className="min-h-11 min-w-11 rounded-lg px-2 text-sm text-blue-700 disabled:opacity-40">עריכה</button>
+                        <button type="button" disabled={deletingId !== null} onClick={() => setEditingShipment(shipment)} title="עריכת שיווק" aria-label={`ערוך שיווק מתאריך ${shipment.date.split("-").reverse().join("/")}`} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-blue-700 disabled:opacity-40"><Pencil size={16} aria-hidden="true" /></button>
                         {canDelete && <button
                           type="button"
                           onClick={() => deleteShipment(shipment)}
@@ -452,7 +458,7 @@ function FarmApp() {
                     </tr>
                   ))}
                   {listShipments.length === 0 && (
-                    <tr><td colSpan={canCreate ? 5 : 4} className="p-4 text-center text-zinc-500">אין שיווקים התואמים לסינון</td></tr>
+                    <tr><td colSpan={canCreate ? 6 : 5} className="p-4 text-center text-zinc-500">אין שיווקים התואמים לסינון</td></tr>
                   )}
                 </tbody>
               </table>

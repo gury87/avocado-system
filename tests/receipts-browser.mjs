@@ -181,7 +181,8 @@ try {
   assert.equal(await evaluate("document.querySelector('button[aria-label=\"מיון לפי תאריך\"]').closest('th').getAttribute('aria-sort')"), "ascending");
   await evaluate("document.querySelector('button[aria-label=\"מיון לפי מיכלים\"]').click()");
   assert.equal(await evaluate("document.querySelector('button[aria-label=\"מיון לפי מיכלים\"]').closest('th').getAttribute('aria-sort')"), "ascending");
-  await click("עריכה"); await waitText("עריכת שיווק");
+  assert.equal(await evaluate("document.querySelectorAll('td span[title^=\"שויך תשלום מאושר\"]').length"), 1);
+  await evaluate("document.querySelector('button[aria-label^=\"ערוך שיווק\"]').click()"); await waitText("עריכת שיווק");
   await fill("תאריך שיווק", "2026-09-05"); await fill("חלקה", "2");
   await screenshot("shipment-edit-mobile-320.png");
   await page("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
@@ -193,7 +194,7 @@ try {
   await waitText("05/09/2026"); assert.equal(shipmentVersion, 1);
 
   role = "worker"; await seedSession(); await page("Page.navigate", { url: origin }); await waitText("עובד");
-  await click("שיווקים"); await waitText("רשימת שיווקים"); await click("עריכה");
+  await click("שיווקים"); await waitText("רשימת שיווקים"); await evaluate("document.querySelector('button[aria-label^=\"ערוך שיווק\"]').click()");
   await fill("מספר מיכלים", "3"); await click("שמור שינויים");
   await waitFor(() => evaluate("!document.querySelector('dialog[open]')"), "worker edit saved");
   assert.equal(shipmentVersion, 2);
@@ -202,7 +203,7 @@ try {
   assert.equal(await evaluate("[...document.querySelectorAll('button')].some(item=>item.textContent.trim()==='תקבולים')"), false);
   assert.equal(await evaluate("[...document.querySelectorAll('button')].some(item=>item.textContent.trim()==='שמור שיווק')"), false);
   await click("שיווקים"); await waitText("רשימת שיווקים");
-  assert.equal(await evaluate("[...document.querySelectorAll('button')].some(item=>item.textContent.trim()==='עריכה')"), false);
+  assert.equal(await evaluate("!!document.querySelector('button[aria-label^=\"ערוך שיווק\"]')"), false);
   await evaluate("document.querySelector('button[aria-label=\"מיון לפי מיכלים\"]').click()");
   assert.equal(await evaluate("document.querySelector('button[aria-label=\"מיון לפי מיכלים\"]').closest('th').getAttribute('aria-sort')"), "ascending");
   assert.deepEqual(errors, []);
