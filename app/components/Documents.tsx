@@ -6,7 +6,7 @@ import PhotoEditor from "./PhotoEditor";
 import PhotoViewer, { PhotoThumbnail } from "./PhotoViewer";
 
 type Document = { id: string; storage_path: string; file_name: string; file_size: number; mime_type?: string };
-const isPhoto = (file: Document) => file.mime_type?.startsWith("image/") || /\.(jpe?g|png|webp)$/i.test(file.storage_path);
+const isPhoto = (file: Document) => file.mime_type ? file.mime_type.startsWith("image/") : /\.(jpe?g|png|webp)$/i.test(file.storage_path);
 export default function Documents({ kind, id, onBusyChange }: { kind: "receipt" | "shipment"; id: string; onBusyChange?: (busy: boolean) => void }) {
   const { profile } = useAuth();
   const [expanded, setExpanded] = useState(false), [files, setFiles] = useState<Document[]>([]);
@@ -77,8 +77,7 @@ export default function Documents({ kind, id, onBusyChange }: { kind: "receipt" 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
       {files.map((file) => <div key={file.id} className="min-w-0 rounded-xl border border-zinc-200 p-2">
         {isPhoto(file) && <PhotoThumbnail path={file.storage_path} name={file.file_name} disabled={busy} onOpen={() => setViewing(file)} />}
-        <button type="button" disabled={busy} className="min-h-11 min-w-0 flex-1 break-words text-right text-blue-700 underline" onClick={async () => {
-          if (isPhoto(file)) { setViewing(file); return; }
+        {!isPhoto(file) && <button type="button" disabled={busy} className="min-h-11 min-w-0 flex-1 break-words text-right text-blue-700 underline" onClick={async () => {
           working(true); setError("");
           try {
             const { data, error } = await storage.createSignedUrl(file.storage_path, 60);
@@ -87,7 +86,7 @@ export default function Documents({ kind, id, onBusyChange }: { kind: "receipt" 
             window.location.assign(data.signedUrl);
           } catch { setError("לא ניתן לפתוח את המסמך. נסה שוב."); }
           finally { working(false); }
-        }}>{file.file_name}</button>
+        }}>{file.file_name}</button>}
         <button type="button" disabled={busy} aria-label={`מחק מסמך ${file.file_name}`} className="min-h-11 shrink-0 text-red-700" onClick={async () => {
           if (!window.confirm(`למחוק לצמיתות את המסמך ${file.file_name}?`)) return;
           working(true); setError("");

@@ -274,7 +274,8 @@ try {
     await fill("רוחב", "50"); await fill("גובה", "50");
     await screenshot("photo-editor-mobile-320.png");
     await click("שמירה והעלאה");
-    await waitText("test-receipt.jpg");
+    await waitFor(() => evaluate("!!document.querySelector('button[aria-label=\"הגדל תמונה test-receipt.jpg\"]')"), "uploaded photo preview");
+    assert.equal((await text()).includes("test-receipt.jpg"), false, "Photo file name is not displayed");
     const image = await waitFor(() => evaluate("window.__photoUpload"), "edited image uploaded");
     assert.equal(image.width, 200); assert.equal(image.height, 300); assert.equal(image.type, "image/jpeg");
     assert.ok(image.pixel[0] > 240 && image.pixel[2] < 15, "Uploaded pixels come from the rotated/cropped red quadrant");
