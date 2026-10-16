@@ -17,12 +17,12 @@ function failure(cause: unknown) {
 export default function FarmSettings({ onDirtyChange }: { onDirtyChange: (dirty: boolean) => void }) {
   const { profile } = useAuth(), { catalog, refresh } = useCatalog();
   const [tab, setTab] = useState<CatalogKind>("plots");
-  const [settings, setSettings] = useState({ days: String(catalog.settings.overdue_days), loss: String(catalog.settings.loss_warning_percent), version: catalog.settings.version });
+  const [settings, setSettings] = useState({ days: String(catalog.settings.overdue_days), loss: String(catalog.settings.loss_warning_percent), small: String(catalog.settings.picking_rate_small), large: String(catalog.settings.picking_rate_large), version: catalog.settings.version });
   const [entry, setEntry] = useState<{ id: string | null; name: string; active: boolean; dunam: string; version: number } | null>(null);
   const [dirty, setDirty] = useState(false), [busy, setBusy] = useState(false), [message, setMessage] = useState("");
   useEffect(()=>{
     if(dirty||entry)return;
-    const timer=window.setTimeout(()=>setSettings({days:String(catalog.settings.overdue_days),loss:String(catalog.settings.loss_warning_percent),version:catalog.settings.version}),0);
+    const timer=window.setTimeout(()=>setSettings({days:String(catalog.settings.overdue_days),loss:String(catalog.settings.loss_warning_percent),small:String(catalog.settings.picking_rate_small),large:String(catalog.settings.picking_rate_large),version:catalog.settings.version}),0);
     return()=>window.clearTimeout(timer);
   },[catalog.settings,dirty,entry]);
   useEffect(() => {
@@ -32,7 +32,7 @@ export default function FarmSettings({ onDirtyChange }: { onDirtyChange: (dirty:
   if (profile.role !== "admin") return null;
   const mark = () => { setDirty(true); onDirtyChange(true); };
   const canLeave = () => !dirty || window.confirm("יש שינויים בהגדרות שלא נשמרו. לעזוב אותם?");
-  const clear = () => { setDirty(false); onDirtyChange(false); setEntry(null); setSettings({ days:String(catalog.settings.overdue_days),loss:String(catalog.settings.loss_warning_percent),version:catalog.settings.version }); };
+  const clear = () => { setDirty(false); onDirtyChange(false); setEntry(null); setSettings({ days:String(catalog.settings.overdue_days),loss:String(catalog.settings.loss_warning_percent),small:String(catalog.settings.picking_rate_small),large:String(catalog.settings.picking_rate_large),version:catalog.settings.version }); };
   const open = (e?: CatalogEntry) => { if (!canLeave() || busy) return; clear(); setMessage(""); setEntry({ id:e?.id || null,name:e?.name || "",active:e?.active ?? true,dunam:e?.dunam == null ? "" : String(e.dunam),version:e?.version || 0 }); };
   return <section className="space-y-4 text-zinc-900">
     <h2 className="text-2xl font-bold">הגדרות המשק</h2>
@@ -42,7 +42,7 @@ export default function FarmSettings({ onDirtyChange }: { onDirtyChange: (dirty:
     <form className="rounded-xl border border-zinc-200 bg-white p-4" onSubmit={async (event) => {
       event.preventDefault(); if (busy) return; setBusy(true); onDirtyChange(true); setMessage("");
       try {
-        const { error }=await supabase.rpc("admin_save_farm_settings",{expected_version:settings.version,new_overdue_days:Number(settings.days),new_loss_warning_percent:Number(settings.loss)});
+        const { error }=await supabase.rpc("admin_save_farm_settings_with_picking",{expected_version:settings.version,new_overdue_days:Number(settings.days),new_loss_warning_percent:Number(settings.loss),new_picking_rate_small:Number(settings.small),new_picking_rate_large:Number(settings.large)});
         if(error) throw error;
         const ok=await refresh(); setSettings({...settings,version:settings.version+1});setDirty(false);onDirtyChange(false);setMessage(ok?"הפרמטרים נשמרו.":"הפרמטרים נשמרו. יש לרענן את המסך לטעינת הערכים העדכניים.");
       } catch(cause){setMessage(failure(cause));onDirtyChange(dirty);} finally{setBusy(false);}
@@ -53,6 +53,8 @@ export default function FarmSettings({ onDirtyChange }: { onDirtyChange: (dirty:
         <p className="text-xs text-zinc-500">מסומן רק שיווק עם יתרת מיכלים שלא שויכו לתקבול מאושר, שגילו גדול מהסף.</p>
         <label className="block text-sm">סף סימון פחת (%)<input required type="number" min="0" max="100" step="0.1" value={settings.loss} className={inputClass} onChange={(e)=>{setSettings({...settings,loss:e.target.value});mark();}} /></label>
         <p className="text-xs text-zinc-500">פחת מחושב מהברוטו לאחר ניכוי משקל המיכלים. הסף הוא כלי סימון שניתן להתאמה.</p>
+        {([['small','קטן'],['large','גדול']] as const).map(([key,label])=><label key={key} className="block text-sm">עלות קטיף למיכל {label} (₪)<input required type="number" min="0" max="1000000" step="0.01" value={settings[key]} className={inputClass} onChange={(e)=>{setSettings({...settings,[key]:e.target.value});mark();}} /></label>)}
+        <p className="text-xs text-zinc-500">תעריפי הקטיף יחולו על שיווקים חדשים בלבד. לכל שיווק נשמר התעריף שלו; שינוי כמות בשיווק קיים משתמש בתעריף ההיסטורי.</p>
         <button type="submit" className="min-h-11 rounded-lg bg-zinc-900 px-3 text-white">{busy?"שומר…":"שמירת פרמטרים"}</button>
       </fieldset>
     </form>

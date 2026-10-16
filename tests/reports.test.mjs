@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildReport, groupReport, splitCents } from "../app/lib/reports.ts";
+import { buildReport, groupReport, splitCents, monthlyVarietyPrices } from "../app/lib/reports.ts";
 import { workbook } from "../app/lib/excel.ts";
 const shipments = [
   { id: "1", harvest_date: "2026-09-01", trader_id: "1", variety_id: "1", plot_id: "1", containers: 4, picking_cost: "520" },
@@ -45,4 +45,17 @@ test("Excel export writes an XLSX package with RTL sheets, numeric cells and saf
   assert.ok(text.includes('t="inlineStr"')); assert.ok(text.includes("&lt;&amp;"));
   assert.ok(!text.includes("<f>"));
   assert.ok(text.includes("xl/workbook.xml"));
+});
+
+test("Monthly prices weight kg, split varieties and retain missing-month gaps", () => {
+  const rows=buildReport(data,filters,"2026-10-15");
+  rows.push({...rows[0],shipment:{...rows[0].shipment,harvest_date:"2026-12-01"},kg:90,revenue:90000});
+  const chart=monthlyVarietyPrices(rows);
+  assert.deepEqual(chart.months,["2026-09","2026-10","2026-11","2026-12"]);
+  assert.equal(chart.series[0].points[0].price,100.01/30);
+  assert.equal(chart.series[0].points[1],null);
+  assert.equal(chart.series[0].points[2],null);
+  assert.equal(chart.series[0].points[3].price,10);
+  assert.equal(chart.series[1].points[1].price,3);
+  assert.deepEqual(monthlyVarietyPrices([]),{months:[],series:[]});
 });

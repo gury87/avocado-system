@@ -67,7 +67,7 @@ try {
   const profile = () => ({ id: userId(), full_name: "משתמש בדיקה", email: "test@example.com", role, is_active: true, joined_at: "2026-10-15T00:00:00Z" });
   const user = () => ({ id: userId(), email: "test@example.com", role: "authenticated", aud: "authenticated", app_metadata: {}, user_metadata: {}, created_at: "2026-10-15T00:00:00Z" });
   const workspace = { traders: [{ id: "1", name: "ראובן יהודה" }], shipments: [{ id: "1", trader_id: "1", variety_id: "2", plot_id: "1", harvest_date: "2026-09-06", containers: 2, used_containers: 0 }], receipts: [] };
-  const catalog = {settings:{overdue_days:14,loss_warning_percent:10,version:0},
+  const catalog = {settings:{picking_rate_small:130,picking_rate_large:150,overdue_days:14,loss_warning_percent:10,version:0},
     plots:[{id:"1",name:"כביש 70",dunam:10},{id:"2",name:"חלקה א",dunam:20},{id:"3",name:"בית העלמין",dunam:null}].map(e=>({...e,active:true,version:0})),
     traders:[{id:"1",name:"ראובן יהודה"},{id:"2",name:"סוחר נוסף"}].map(e=>({...e,active:true,version:0})),
     varieties:[{id:"1",name:"אטינגר"},{id:"2",name:"גליל"},{id:"3",name:"הס"},{id:"4",name:"פוארטה"}].map(e=>({...e,active:true,version:0}))};
@@ -98,11 +98,11 @@ try {
       let body;
       if (url.pathname === "/auth/v1/user") body = user();
       else if (url.pathname === "/rest/v1/profiles") body = profile();
-      else if (url.pathname === "/rest/v1/harvest_events") body = [{ ...workspace.shipments[0], id: 1, edit_version: shipmentVersion, container_size: "קטן" }];
+      else if (url.pathname === "/rest/v1/harvest_events") body = [{ ...workspace.shipments[0], id: 1, edit_version: shipmentVersion, container_size: "קטן", picking_rate:130, picking_cost:130*workspace.shipments[0].containers }];
       else if (url.pathname.endsWith("/get_farm_catalog")) body = catalog;
-      else if (url.pathname.endsWith("/admin_save_farm_settings")) {
+      else if (url.pathname.endsWith("/admin_save_farm_settings_with_picking")) {
         assert.equal(role,"admin");const r=JSON.parse(event.request.postData);assert.equal(r.expected_version,catalog.settings.version);
-        catalog.settings={overdue_days:r.new_overdue_days,loss_warning_percent:r.new_loss_warning_percent,version:r.expected_version+1};body=null;
+        catalog.settings={picking_rate_small:r.new_picking_rate_small,picking_rate_large:r.new_picking_rate_large,overdue_days:r.new_overdue_days,loss_warning_percent:r.new_loss_warning_percent,version:r.expected_version+1};body=null;
       } else if (url.pathname.endsWith("/admin_save_catalog")) {
         assert.equal(role,"admin");const r=JSON.parse(event.request.postData),list=catalog[r.kind];
         if(r.target_id){const e=list.find(e=>e.id===r.target_id);assert.equal(e.version,r.expected_version);Object.assign(e,{name:r.new_name,active:r.new_active,version:e.version+1,...(r.kind==="plots"?{dunam:r.new_dunam}:{})});body=e.id;}
@@ -146,7 +146,7 @@ try {
       } else if (url.pathname.endsWith("/get_shipment_traders")) {
         assert.ok(role === "admin" || role === "worker");
         body = catalog.traders.map(e=>({id:e.id,name:e.name}));
-      } else if (url.pathname.endsWith("/edit_farm_shipment_with_trader")) {
+      } else if (url.pathname.endsWith("/edit_farm_shipment_with_picking")) {
         assert.ok(role === "admin" || role === "worker");
         const request = JSON.parse(event.request.postData);
         assert.equal(request.expected_version, shipmentVersion);
@@ -197,6 +197,7 @@ try {
   failureInfo = async () => ({ text: await text(), errors, requests });
   const waitText = (value) => waitFor(async () => (await text()).includes(value), value);
   const click = async (value) => {
+    await waitFor(()=>evaluate(`[...document.querySelectorAll('button')].some(item=>item.textContent.trim()===${JSON.stringify(value)}&&!item.disabled)`),`button ready: ${value}`);
     await evaluate(`(() => { const button=[...document.querySelectorAll('button')].find(item=>item.textContent.trim()===${JSON.stringify(value)}); if(!button || button.disabled) throw Error('Button unavailable: '+${JSON.stringify(value)}); button.click(); })()`);
   };
   const fill = async (label, value) => {
@@ -251,6 +252,7 @@ try {
     await page("Emulation.setDeviceMetricsOverride", { width, height: 844, deviceScaleFactor: 1, mobile: true });
     const table = await evaluate("(() => { const t=document.querySelector('[data-shipment-list]'); return {width:t.clientWidth,content:t.scrollWidth,available:t.parentElement.clientWidth}; })()");
     assert.ok(table.content <= table.available + 1, `Shipment table overflows at ${width}px: ${JSON.stringify(table)}`);
+    assert.ok(await evaluate("(()=>{const a=document.querySelector('button[aria-label^=\"ערוך שיווק\"]').getBoundingClientRect(),b=document.querySelector('button[aria-label^=\"מחק שיווק\"]').getBoundingClientRect();return Math.abs(a.top-b.top)<1&&a.height>=44&&b.height>=44})()"),"Edit and delete share a row with comfortable touch height");
     await screenshot(`shipments-mobile-${width}.png`);
   }
   await page("Emulation.setDeviceMetricsOverride", { width: 320, height: 844, deviceScaleFactor: 1, mobile: true });
@@ -339,9 +341,13 @@ try {
   await click("דוחות ומעקב"); await waitText("יתרות פתוחות לפי סוחר");
   await waitFor(() => evaluate("!!document.querySelector('summary')"), "reports loaded");
   assert.ok((await text()).includes("5 מיכלים"), "Both traders' open containers are counted");
+  assert.ok(await evaluate("document.querySelectorAll('[data-report-overdue]').length===2"),"Balances flag both overdue open shipments");
   await screenshot("reports-balances-mobile-320.png");
   await click("מחירים ומגמות"); await waitText("מגמה חודשית");
   assert.ok((await text()).includes("1.80"), "Weighted price uses confirmed revenue / kg");
+  assert.ok(await evaluate("!!document.querySelector('svg[aria-label^=\"ציר X חודש\"]')"),"Monthly variety chart is visible");
+  await fill("פירוט נקודה","2:2026-09");
+  assert.ok((await text()).includes("1.8 ₪ לק״ג · 560 ק״ג"),"Chart details show weighted price and kg");
   await screenshot("reports-prices-mobile-320.png");
   await click("משקל ופחת");await waitText("השוואת משקל ופחת לפי סוחר וזן");
   assert.ok((await text()).includes("פחת 17"));
@@ -410,17 +416,17 @@ try {
     await click("שיווקים");
   }
 
-  await click("הגדרות המשק");await waitText("הגדרות המשק");
+  await click("הגדרות");await waitText("הגדרות המשק");
   assert.equal(await evaluate("[...document.querySelectorAll('label')].find(l=>l.textContent.startsWith('סימון שיווק פתוח'))?.querySelector('input').value"),"14");
-  await fill("סימון שיווק פתוח", "30");await fill("סף סימון פחת", "2");
+  await fill("סימון שיווק פתוח", "30");await fill("סף סימון פחת", "2");await fill("עלות קטיף למיכל קטן","175");await fill("עלות קטיף למיכל גדול","210");
   acceptDialog=false;await click("שיווקים");acceptDialog=true;
   assert.ok((await text()).includes("שמירת פרמטרים"),"Unsaved settings navigation can be cancelled");
   await click("שמירת פרמטרים");await waitText("הפרמטרים נשמרו");
-  assert.equal(catalog.settings.overdue_days,30);assert.equal(catalog.settings.loss_warning_percent,2);
+  assert.equal(catalog.settings.picking_rate_small,175);assert.equal(catalog.settings.picking_rate_large,210);assert.equal(catalog.settings.overdue_days,30);assert.equal(catalog.settings.loss_warning_percent,2);
   await click("דוחות ומעקב");await waitText("יתרות פתוחות לפי סוחר");await click("משקל ופחת");await waitText("מעל סף הפחת שהוגדר");
   assert.equal(await evaluate("document.querySelectorAll('[data-loss-line][data-loss-warning]').length"),1,"Above-threshold receipt line is highlighted");
   assert.equal(await evaluate("[...document.querySelectorAll('[data-loss-group]')].some(e=>e.classList.contains('bg-amber-50')||e.textContent.includes('מעל סף'))"),false,"Trader/variety aggregates remain neutral");
-  await click("הגדרות המשק");await waitText("שמירת פרמטרים");
+  await click("הגדרות");await waitText("שמירת פרמטרים");
   await click("הוספת חלקה");await fill("שם","חלקת בדיקה");await fill("שטח בדונם","12.5");await click("שמירת רשומה");await waitText("הרשומה נשמרה");
   assert.equal(catalog.plots.at(-1).dunam,12.5);
   await evaluate("document.querySelector('button[aria-label=\"ערוך חלקת בדיקה\"]').click()");
@@ -431,7 +437,7 @@ try {
   await click("ראשי");await waitText("שיווק חדש");
   assert.ok(await evaluate("[...document.querySelectorAll('option')].some(e=>e.textContent==='זן בדיקה')"),"New varieties are available in shipment entry");
   assert.ok(await evaluate("[...document.querySelectorAll('option')].some(e=>e.textContent==='חלקת בדיקה מעודכנת')"),"Plot names come from the managed catalog");
-  await click("הגדרות המשק");await click("חלקות");
+  await click("הגדרות");await waitText("שמירת פרמטרים");await click("חלקות");
   await evaluate("document.querySelector('button[aria-label=\"ערוך חלקת בדיקה מעודכנת\"]').click()");
   await evaluate("document.querySelector('input[type=checkbox]').click()");await click("שמירת רשומה");await waitText("הרשומה נשמרה");
   await fill("סימון שיווק פתוח","14");await click("שמירת פרמטרים");await waitText("הפרמטרים נשמרו");
@@ -441,6 +447,7 @@ try {
   assert.equal(await evaluate("[...document.querySelectorAll('button')].some(b=>b.textContent==='הגדרות המשק')"),false);
   assert.equal(await evaluate("[...document.querySelectorAll('button')].some(item=>item.textContent==='דוחות ומעקב')"), false);
   await click("שיווקים"); await waitText("רשימת שיווקים"); await evaluate("document.querySelector('button[aria-label^=\"ערוך שיווק\"]').click()");
+  assert.ok(await evaluate("[...document.querySelectorAll('label')].find(l=>l.textContent.startsWith('עלות קטיף למיכל')).querySelector('input').disabled"),"Worker sees cost but cannot edit it");
   await fill("מספר מיכלים", "3");
   await waitFor(() => evaluate("[...document.querySelectorAll('button')].some(b=>b.textContent==='שמור שינויים'&&!b.disabled)"), "worker edit ready");
   await click("שמור שינויים");

@@ -335,5 +335,37 @@ test("Receipt SQL enforces atomic accounting, permissions and allocation limits"
       await assert.rejects(saveEntry("varieties","1",0,"אטינגר",false),/LAST_ACTIVE_CATALOG/);
       assert.ok((await asUser(admin,"select * from audit_log where action='catalog_updated'")).length>=6);
     });
+    await t.test("Picking defaults affect new shipments only and edits preserve historical costs",async()=>{
+      await db.exec("update harvest_events set picking_cost=401 where id=1; update harvest_events set picking_cost=null where id=2");
+      const before=(await db.query("select id,picking_cost from harvest_events order by id")).rows;
+      await db.exec(await read("supabase/migrations/009_picking_rates.sql"));
+      assert.deepEqual((await db.query("select id,picking_cost from harvest_events order by id")).rows,before);
+      const settings=(await asUser(admin,"select get_farm_catalog() as c"))[0].c.settings;
+      const v=settings.version;
+      for(const user of [worker,viewer])await assert.rejects(asUser(user,"select admin_save_farm_settings_with_picking($1,14,10,180,220)",[v]),/FORBIDDEN/);
+      await assert.rejects(asUser(admin,"select admin_save_farm_settings_with_picking($1,14,10,-1,220)",[v]),/INVALID_SETTINGS/);
+      await asUser(admin,"select admin_save_farm_settings_with_picking($1,14,10,180,220)",[v]);
+      await assert.rejects(asUser(admin,"select admin_save_farm_settings_with_picking($1,14,10,180,220)",[v]),/STALE_SETTINGS/);
+      assert.deepEqual((await db.query("select id,picking_cost from harvest_events order by id")).rows,before);
+      const insert=async(size)=>(await asUser(worker,"insert into harvest_events(trader_id,harvest_date,variety_id,plot_id,containers,container_size,picking_cost,picking_rate) values(1,'2026-10-01',1,1,3,$1,1,1) returning *",[size]))[0];
+      const small=await insert('קטן'),large=await insert('גדול');
+      assert.equal(Number(small.picking_rate),180);assert.equal(Number(small.picking_cost),540);
+      assert.equal(Number(large.picking_rate),220);assert.equal(Number(large.picking_cost),660);
+      const change=async(user,version,count,rate=null)=>(await asUser(user,"select edit_farm_shipment_with_picking($1,$2,'2026-10-02',1,1,$3,'1',$4) as c",[String(small.id),version,count,rate]))[0].c;
+      await assert.rejects(change(worker,0,3,99),/FORBIDDEN/);
+      await assert.rejects(change(viewer,0,3),/FORBIDDEN/);
+      await assert.rejects(change(admin,0,3,-1),/INVALID_PICKING_RATE/);
+      await asUser(admin,"select admin_save_farm_settings_with_picking($1,14,10,250,300)",[v+1]);
+      assert.equal(Number((await change(worker,0,3)).picking_cost),540);
+      assert.equal(Number((await change(worker,1,4)).picking_cost),720);
+      assert.equal(Number((await change(admin,2,4,100.25)).picking_cost),401);
+      await assert.rejects(change(admin,2,4,1),/STALE_SHIPMENT/);
+      assert.equal(Number((await change(worker,3,5)).picking_cost),501.25);
+      // An old client uses the same preserved rate through the original RPC.
+      await asUser(worker,"select edit_farm_shipment_with_trader($1,4,'2026-10-02',1,1,6,'1')",[String(small.id)]);
+      assert.equal(Number((await db.query("select picking_cost from harvest_events where id=$1",[small.id])).rows[0].picking_cost),601.5);
+      assert.equal((await db.query("select picking_rate from harvest_events where id=2")).rows[0].picking_rate,null);
+      assert.ok((await asUser(admin,"select * from audit_log where action='shipment_picking_updated'")).length);
+    });
   } finally { await db.close(); }
 });

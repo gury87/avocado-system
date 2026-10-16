@@ -28,6 +28,8 @@ type Shipment = {
   plotId: number;
   editVersion: number;
   traderId: string;
+  pickingRate: number | null;
+  pickingCost: number | null;
 };
 
 export default function Home() {
@@ -37,12 +39,12 @@ export default function Home() {
 function FarmApp() {
   const { catalog, plots, varieties } = useCatalog();
   const farmToday=useFarmToday();
-  const { profile, setUnsavedChanges } = useAuth();
+  const { profile, setUnsavedChanges, appDestination } = useAuth();
   const canCreate = profile.role === "admin" || profile.role === "worker";
   const canDelete = profile.role === "admin";
   const [activeTab, setActiveTab] = useState<
     "dashboard" | "shipments" | "shipment-list" | "receipts" | "reports" | "settings"
-  >("shipments");
+  >(appDestination);
 
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [editingShipment, setEditingShipment] = useState<Shipment | null>(null);
@@ -140,7 +142,7 @@ function FarmApp() {
   const loadShipments = useCallback(async () => {
     const records: {
       id: string | number; harvest_date: string; variety_id: number; plot_id: number;
-      containers: number; container_size: string; edit_version?: number; trader_id: string | number | null;
+      containers: number; container_size: string; edit_version?: number; trader_id: string | number | null; picking_rate?: number | null; picking_cost?: number | null;
     }[] = [];
     // Fetch all pages so the dashboard is not limited by the REST row cap.
     for (let offset = 0; ; offset += 500) {
@@ -175,6 +177,8 @@ function FarmApp() {
       plotId: Number(record.plot_id),
       editVersion: record.edit_version ?? 0,
       traderId: String(record.trader_id ?? ""),
+      pickingRate: record.picking_rate == null ? null : Number(record.picking_rate),
+      pickingCost: record.picking_cost == null ? null : Number(record.picking_cost),
     }));
   
     setShipments(mappedShipments);
@@ -190,7 +194,6 @@ function FarmApp() {
   const addShipment = async () => {
     if (!canCreate) return;
     if (!catalog.varieties.some((e)=>e.id===form.variety&&e.active)||!catalog.plots.some((e)=>e.id===form.plot&&e.active)) { alert("יש לבחור חלקה וזן פעילים."); return; }
-    const pickingCost = form.containers * 130;
     const confirmationMessage = [
       "האם לשמור את השיווק הבא?",
       "",
@@ -213,7 +216,6 @@ function FarmApp() {
       picker_id: 1,
       containers: form.containers,
       container_size: "קטן",
-      picking_cost: pickingCost,
       status: "pending",
     };
 
@@ -328,7 +330,6 @@ function FarmApp() {
             className={`min-h-11 rounded-xl p-3 ${activeTab === "receipts" ? "bg-zinc-900 text-white" : "bg-white text-zinc-700"}`}
           >תקבולים</button>}
           {canDelete && <button onClick={() => selectTab("reports")} className={`min-h-11 rounded-xl p-3 ${activeTab === "reports" ? "bg-zinc-900 text-white" : "bg-white text-zinc-700"}`}>דוחות ומעקב</button>}
-          {canDelete && <button onClick={() => selectTab("settings")} className={`min-h-11 rounded-xl p-3 ${activeTab === "settings" ? "bg-zinc-900 text-white" : "bg-white text-zinc-700"}`}>הגדרות המשק</button>}
         </div>
 
         {activeTab === "reports" && canDelete && <Reports />}
@@ -408,12 +409,12 @@ function FarmApp() {
               <table data-shipment-list className="w-full table-fixed text-right text-[11px] text-zinc-700 sm:table-auto sm:text-xs [&_td]:px-1 [&_th]:px-1">
                 <caption className="sr-only">רשימת שיווקים עם סינון ומיון לפי עמודות</caption>
                 <colgroup>
-                  <col style={{ width: canCreate ? "26%" : "30%" }} />
+                  <col style={{ width: canCreate ? "25%" : "30%" }} />
                   <col style={{ width: canCreate ? "14%" : "18%" }} />
-                  <col style={{ width: canCreate ? "19%" : "26%" }} />
+                  <col style={{ width: canCreate ? "15%" : "26%" }} />
                   <col style={{ width: canCreate ? "14%" : "18%" }} />
                   <col style={{ width: "8%" }} />
-                  {canCreate && <col style={{ width: "19%" }} />}
+                  {canCreate && <col style={{ width: "24%" }} />}
                 </colgroup>
                 <thead className="bg-zinc-50 text-zinc-900">
                   <tr>
@@ -442,18 +443,18 @@ function FarmApp() {
                       <td className="px-1 py-2 text-center">
                         {paidShipmentIds.has(shipment.id) && <span title="שויך תשלום מאושר לשיווק (מלא או חלקי)" className="text-lg font-bold text-green-700"><span aria-hidden="true">₪</span><span className="sr-only">שויך תשלום מאושר לשיווק (מלא או חלקי)</span></span>}
                       </td>
-                      {canCreate && <td className="px-1 py-2">
-                        <button type="button" disabled={deletingId !== null} onClick={() => setEditingShipment(shipment)} title="עריכת שיווק" aria-label={`ערוך שיווק מתאריך ${shipment.date.split("-").reverse().join("/")}`} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-blue-700 disabled:opacity-40"><Pencil size={16} aria-hidden="true" /></button>
+                      {canCreate && <td className="px-1 py-1"><div className="flex items-center justify-center">
+                        <button type="button" disabled={deletingId !== null} onClick={() => setEditingShipment(shipment)} title="עריכת שיווק" aria-label={`ערוך שיווק מתאריך ${shipment.date.split("-").reverse().join("/")}`} className="inline-flex h-11 w-8 shrink-0 items-center justify-center rounded-lg text-blue-700 disabled:opacity-40"><Pencil size={16} aria-hidden="true" /></button>
                         {canDelete && <button
                           type="button"
                           onClick={() => deleteShipment(shipment)}
                           disabled={deletingId !== null}
                           aria-label={`מחק שיווק ${shipment.variety} מחלקת ${shipment.plot} בתאריך ${shipment.date.split("-").reverse().join("/")}`}
-                          className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-red-600 hover:bg-red-50 disabled:opacity-40"
+                          className="flex h-11 w-8 shrink-0 items-center justify-center rounded-lg text-red-600 hover:bg-red-50 disabled:opacity-40"
                         >
                           <span aria-hidden="true" className="text-sm font-bold">✕</span>
                         </button>}
-                      </td>}
+                      </div></td>}
                     </tr>
                   ))}
                   {listShipments.length === 0 && (

@@ -7,7 +7,7 @@ import { roleLabels, type Profile } from "../lib/auth-types";
 import Account from "./Account";
 import UserManagement from "./UserManagement";
 
-const AuthContext = createContext<{ profile: Profile; refresh: () => Promise<void>; setUnsavedChanges: (dirty: boolean) => void } | null>(null);
+const AuthContext = createContext<{ appDestination: "shipments" | "settings"; profile: Profile; refresh: () => Promise<void>; setUnsavedChanges: (dirty: boolean) => void } | null>(null);
 export function useAuth() {
   const value = useContext(AuthContext);
   if (!value) throw new Error("Auth provider missing");
@@ -21,14 +21,20 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   const [error, setError] = useState("");
   const [setup, setSetup] = useState(false);
   const [screen, setScreen] = useState<"app" | "account" | "users">("app");
+  const [appDestination, setAppDestination] = useState<"shipments" | "settings">("shipments");
+  const [navigationKey, setNavigationKey] = useState(0);
   const generation = useRef(0);
   const currentIdentity = useRef<string | null>(null);
   const unsavedChanges = useRef(false);
   const setUnsavedChanges = useCallback((dirty: boolean) => { unsavedChanges.current = dirty; }, []);
   const canLeave = () => !unsavedChanges.current || window.confirm("יש שינויים שלא נשמרו. לעזוב אותם?");
+  const openApp = (destination: "shipments" | "settings") => {
+    if (!canLeave()) return;
+    setUnsavedChanges(false); setAppDestination(destination); setNavigationKey(k => k + 1); setScreen("app");
+  };
   const navigate = (next: typeof screen) => {
     if (next === screen || !canLeave()) return;
-    unsavedChanges.current = false;
+    setUnsavedChanges(false);
     setScreen(next);
   };
 
@@ -140,13 +146,14 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   }} /></AuthFrame>;
 
   return (
-    <AuthContext.Provider value={{ profile, refresh, setUnsavedChanges }}>
+    <AuthContext.Provider value={{ appDestination, profile, refresh, setUnsavedChanges }}>
       <div dir="rtl" className="min-h-screen bg-zinc-100 text-zinc-900">
         <header className="border-b border-zinc-200 bg-white">
           <div className="mx-auto max-w-md space-y-2 px-4 py-3">
             <p className="break-words text-sm">{profile.full_name || profile.email} · {roleLabels[profile.role]}</p>
             <nav className="flex flex-wrap gap-x-4 gap-y-1 text-sm" aria-label="חשבון משתמש">
-              <button className="min-h-11" onClick={() => navigate("app")}>המערכת</button>
+              <button className="min-h-11" onClick={() => openApp("shipments")}>ראשי</button>
+              {profile.role === "admin" && <button className="min-h-11" onClick={() => openApp("settings")}>הגדרות</button>}
               <button className="min-h-11" onClick={() => navigate("account")}>החשבון שלי</button>
               {profile.role === "admin" && <button className="min-h-11" onClick={() => navigate("users")}>ניהול משתמשים</button>}
               <button className="min-h-11 text-red-700" onClick={async () => {
@@ -159,7 +166,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
         </header>
         {screen === "account" ? <div className="mx-auto max-w-md p-4"><Account onComplete={refreshSafely} /></div>
           : screen === "users" && profile.role === "admin" ? <div className="mx-auto max-w-md p-4"><UserManagement /></div>
-            : <div key={`${profile.id}:${profile.role}`}>{children}</div>}
+            : <div key={`${profile.id}:${profile.role}:${navigationKey}`}>{children}</div>}
       </div>
     </AuthContext.Provider>
   );

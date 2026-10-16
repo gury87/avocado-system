@@ -52,3 +52,20 @@ export function groupReport(rows: ReportRow[], keyFor: (row: ReportRow) => strin
   }
   return [...groups.values()].sort((a, b) => a.key.localeCompare(b.key, "he"));
 }
+
+// Missing months remain explicit gaps; prices are weighted by allocated net kg.
+export function monthlyVarietyPrices(rows: ReportRow[]) {
+  const groups = groupReport(rows.filter(r => /^\d{4}-\d{2}/.test(r.shipment.harvest_date)), r => JSON.stringify([r.shipment.variety_id, r.shipment.harvest_date.slice(0,7)])).filter(g => g.kg > 0);
+  const dates = groups.map(g => JSON.parse(g.key)[1] as string).sort();
+  const months: string[] = [];
+  if (dates.length) {
+    const [year, month] = dates[0].split('-').map(Number);
+    for (let d = new Date(Date.UTC(year,month-1,1)); d.toISOString().slice(0,7) <= dates[dates.length-1]; d.setUTCMonth(d.getUTCMonth()+1)) months.push(d.toISOString().slice(0,7));
+  }
+  const ids = [...new Set(groups.map(g => JSON.parse(g.key)[0] as string))].sort();
+  const byKey = new Map(groups.map(g => [g.key,g]));
+  return { months, series: ids.map(id => ({ id, points: months.map(month => {
+    const g = byKey.get(JSON.stringify([id,month]));
+    return g ? { month, kg:g.kg, revenue:g.revenue, price:g.revenue/100/g.kg } : null;
+  }) })) };
+}

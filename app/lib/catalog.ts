@@ -1,6 +1,6 @@
 export type CatalogEntry = { id: string; name: string; active: boolean; version: number; dunam?: number | null };
 export type CatalogKind = "plots" | "traders" | "varieties";
-export type FarmCatalog = { plots: CatalogEntry[]; traders: CatalogEntry[]; varieties: CatalogEntry[]; settings: { overdue_days: number; loss_warning_percent: number; version: number } };
+export type FarmCatalog = { plots: CatalogEntry[]; traders: CatalogEntry[]; varieties: CatalogEntry[]; settings: { picking_rate_small: number; picking_rate_large: number; overdue_days: number; loss_warning_percent: number; version: number } };
 export function catalogNames(entries: CatalogEntry[]) { return Object.fromEntries(entries.map((e) => [e.id, e.name])); }
 export function catalogOptions(entries: CatalogEntry[], current = "") { return entries.filter((e) => e.active || e.id === current); }
 export function defaultEntry(entries: CatalogEntry[], preferred: string) { return entries.find((e) => e.active && e.id === preferred)?.id || entries.find((e) => e.active)?.id || ""; }

@@ -10,7 +10,7 @@ import Documents from "./Documents";
 
 export type EditableShipment = {
   id: string; date: string; variety: string; plot: string; containers: number;
-  varietyId: number; plotId: number; editVersion: number; traderId: string;
+  varietyId: number; plotId: number; editVersion: number; traderId: string; pickingRate: number | null; pickingCost: number | null;
 };
 
 export default function ShipmentEditor({ shipment, onClose, onSaved, onDirtyChange }: {
@@ -20,7 +20,7 @@ export default function ShipmentEditor({ shipment, onClose, onSaved, onDirtyChan
   const { profile } = useAuth();
   const { catalog, plots, varieties } = useCatalog();
   const dialog = useRef<HTMLDialogElement>(null);
-  const [form, setForm] = useState({ date: shipment.date, variety: String(shipment.varietyId), plot: String(shipment.plotId), containers: String(shipment.containers), trader: shipment.traderId });
+  const [form, setForm] = useState({ date: shipment.date, variety: String(shipment.varietyId), plot: String(shipment.plotId), containers: String(shipment.containers), trader: shipment.traderId, pickingRate: shipment.pickingRate == null ? "" : String(shipment.pickingRate) });
   const [traders, setTraders] = useState<{ id: string; name: string }[]>([]);
   const [loadingTraders, setLoadingTraders] = useState(true), [tradersError, setTradersError] = useState(false);
   const loadTraders = useCallback(async () => {
@@ -64,18 +64,19 @@ export default function ShipmentEditor({ shipment, onClose, onSaved, onDirtyChan
       event.preventDefault();
       if (busy || !["admin", "worker"].includes(profile.role)) return;
       if (loadingTraders || tradersError || !traders.some((trader) => trader.id === form.trader)) { setError("יש לבחור סוחר מהרשימה לפני השמירה."); return; }
-      if (!window.confirm(["לשמור את השינויים בשיווק?", `סוחר: ${traders.find((trader) => trader.id === form.trader)?.name}`, `תאריך: ${dateLabel(form.date)}`, `זן: ${varieties[form.variety]}`, `חלקה: ${plots[form.plot]}`, `מיכלים: ${form.containers}`].join("\n"))) return;
+      if (!window.confirm(["לשמור את השינויים בשיווק?", `סוחר: ${traders.find((trader) => trader.id === form.trader)?.name}`, `תאריך: ${dateLabel(form.date)}`, `זן: ${varieties[form.variety]}`, `חלקה: ${plots[form.plot]}`, `מיכלים: ${form.containers}`, ...(profile.role === "admin" && form.pickingRate !== "" ? [`עלות קטיף למיכל: ${form.pickingRate} ₪`] : [])].join("\n"))) return;
       setBusy(true); setError("");
       try {
-        const { data, error: saveError } = await supabase.rpc("edit_farm_shipment_with_trader", {
+        const { data, error: saveError } = await supabase.rpc("edit_farm_shipment_with_picking", {
           target_id: shipment.id, expected_version: shipment.editVersion, new_date: form.date,
           new_variety_id: Number(form.variety), new_plot_id: Number(form.plot), new_containers: Number(form.containers),
           new_trader_id: form.trader,
+          new_picking_rate: profile.role === "admin" && form.pickingRate !== "" && form.pickingRate !== (shipment.pickingRate == null ? "" : String(shipment.pickingRate)) ? Number(form.pickingRate) : null,
         });
         if (saveError) throw saveError;
         onDirtyChange(false);
         await onSaved({ ...shipment, date: form.date, varietyId: Number(form.variety), plotId: Number(form.plot),
-          variety: varieties[form.variety], plot: plots[form.plot], containers: Number(form.containers), editVersion: data.edit_version, traderId: form.trader });
+          variety: varieties[form.variety], plot: plots[form.plot], containers: Number(form.containers), editVersion: data.edit_version, traderId: form.trader, pickingRate: data.picking_rate == null ? null : Number(data.picking_rate), pickingCost: data.picking_cost == null ? null : Number(data.picking_cost) });
         onClose();
       } catch (cause) {
         const message = cause && typeof cause === "object" && "message" in cause ? String(cause.message) : "";
@@ -101,6 +102,9 @@ export default function ShipmentEditor({ shipment, onClose, onSaved, onDirtyChan
         <label className="block text-sm">זן<select value={form.variety} onChange={(e) => update("variety", e.target.value)} className={inputClass}>{catalogOptions(catalog.varieties,String(shipment.varietyId)).map((e) => <option key={e.id} value={e.id}>{e.name}{e.active?"":" (לא פעיל)"}</option>)}</select></label>
         <label className="block text-sm">חלקה<select value={form.plot} onChange={(e) => update("plot", e.target.value)} className={inputClass}>{catalogOptions(catalog.plots,String(shipment.plotId)).map((e) => <option key={e.id} value={e.id}>{e.name}{e.active?"":" (לא פעיל)"}</option>)}</select></label>
         <label className="block text-sm">מספר מיכלים<input required type="number" inputMode="numeric" min="1" max="1000000" step="1" value={form.containers} onChange={(e) => update("containers", e.target.value)} className={inputClass} /></label>
+        <label className="block text-sm">עלות קטיף למיכל (₪)<input disabled={profile.role !== "admin"} type="number" inputMode="decimal" min="0" max="1000000" step="any" value={form.pickingRate} onChange={(e)=>update("pickingRate",e.target.value)} className={inputClass} placeholder="עלות היסטורית חסרה" /></label>
+        <p className="text-sm">סה״כ עלות קטיף: {form.pickingRate === "" ? (Number(form.containers) === shipment.containers && shipment.pickingCost != null ? shipment.pickingCost.toLocaleString("he-IL")+" ₪" : "חסר נתון") : (Math.round(Number(form.pickingRate)*Number(form.containers)*100)/100).toLocaleString("he-IL")+" ₪"}</p>
+        <p className="text-xs text-zinc-500">שינוי תעריף בשיווק זה בלבד, למנהל בלבד. ברירת המחדל לשיווקים חדשים אינה משתנה.</p>
       </fieldset>
       <p className="text-xs text-zinc-500">שינוי תאריך או חלקה יעדכן גם את פילוח הנתונים בדשבורד. שיוכים לתקבולים נשמרים.</p>
       <Documents kind="shipment" id={shipment.id} onBusyChange={(working) => { setBusy(working); onDirtyChange(working || dirty); }} />

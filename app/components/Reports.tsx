@@ -1,10 +1,12 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
-import { dateLabel, localToday, money, normalizeWorkspace, type ReceiptWorkspace } from "../lib/receipts";
-import { useCatalog } from "./FarmCatalog";
+import { dateLabel, money, normalizeWorkspace, type ReceiptWorkspace } from "../lib/receipts";
+import MonthlyPriceChart from "./MonthlyPriceChart";
+import { isOverdue } from "../lib/catalog";
+import { useCatalog, useFarmToday } from "./FarmCatalog";
 import { groupLoss, lossReport, yieldByPlot } from "../lib/analysis";
-import { buildReport, groupReport, type GroupRow, type ReportData, type ReportFilters } from "../lib/reports";
+import { buildReport, groupReport, monthlyVarietyPrices, type GroupRow, type ReportData, type ReportFilters } from "../lib/reports";
 import { downloadExcel, type ExcelSheet } from "../lib/excel";
 import { useAuth } from "./AuthGate";
 
@@ -19,6 +21,7 @@ const previousDate = (date: string) => {
 export default function Reports() {
   const { profile } = useAuth();
   const {catalog,plots,varieties}=useCatalog();
+  const today = useFarmToday();
   const [data, setData] = useState<ReportData | null>(null), [loading, setLoading] = useState(true), [error, setError] = useState("");
   const [filters, setFilters] = useState<ReportFilters>(emptyFilters);
   const [tab, setTab] = useState<"balances" | "prices" | "season" | "loss" | "yield">("balances");
@@ -40,7 +43,6 @@ export default function Reports() {
   }, [load, profile.role]);
   if (profile.role !== "admin") return null;
   const invalid = Boolean(filters.from && filters.to && filters.from > filters.to);
-  const today = localToday();
   const rows = data ? buildReport(data, filters, today) : [];
   const total = groupReport(rows, () => "all")[0];
   const traders = groupReport(rows, (row) => row.shipment.trader_id).sort((a, b) => b.unpaid - a.unpaid);
@@ -67,7 +69,7 @@ export default function Reports() {
       ] },
       { name: "יתרות לפי סוחר", rows: [["סוחר", "מיכלים ששווקו", "טרם שולמו", "שיווק פתוח מוקדם ביותר"], ...traders.map((g) => [traderName(g.key), g.containers, g.unpaid, rows.filter((r) => r.shipment.trader_id === g.key && r.unpaid > 0).map((r) => r.shipment.harvest_date).filter(Boolean).sort()[0] || ""]) ] },
       { name: "מחיר לפי סוחר וזן", rows: [["סוחר", "זן", "נטו ק״ג", "הכנסות משויכות ₪", "ממוצע ₪ לק״ג"], ...prices.map((g) => { const [trader, variety] = JSON.parse(g.key); return [traderName(trader), varieties[variety] || "לא ידוע", g.kg, g.revenue / 100, g.revenue / 100 / g.kg]; })] },
-      { name: "מגמה חודשית", rows: [["חודש שיווק", "נטו ק״ג", "הכנסות משויכות ₪", "ממוצע ₪ לק״ג"], ...months.map((g) => [g.key, g.kg, g.revenue / 100, g.revenue / 100 / g.kg])] },
+      { name: "מגמה חודשית", rows: [["חודש שיווק", "נטו ק״ג", "הכנסות משויכות ₪", "ממוצע ₪ לק״ג"], ...months.map((g) => [g.key, g.kg, g.revenue / 100, g.revenue / 100 / g.kg]), [], ["פירוט לפי חודש וזן"], ["חודש שיווק", "זן", "נטו ק״ג", "הכנסות משויכות ₪", "ממוצע ₪ לק״ג"], ...monthlyVarietyPrices(rows).series.flatMap(s => s.points.flatMap(p => p ? [[p.month, varieties[s.id] || s.id, p.kg, p.revenue / 100, p.price]] : []))] },
       { name: "עונה לפי חלקה וזן", rows: [["חלקה", "זן", "מיכלים", "טרם שולמו", "נטו ק״ג", "הכנסות משויכות ₪", "עלות קטיף ₪"], ...groups.map((g) => { const [plot, variety] = JSON.parse(g.key); return [plots[plot] || "לא ידוע", varieties[variety] || "לא ידוע", ...summary(g)]; })] },
       { name: "פירוט שיווקים", rows: [["מזהה", "תאריך שיווק", "סוחר", "זן", "חלקה", "מיכלים", "שויכו לתשלום", "טרם שולמו", "ימים משיווק", "נטו ק״ג", "הכנסות משויכות ₪", "עלות קטיף ₪"], ...rows.map((r) => [r.shipment.id, r.shipment.harvest_date, traderName(r.shipment.trader_id), varieties[r.shipment.variety_id] || "לא ידוע", plots[r.shipment.plot_id] || "לא ידוע", Number(r.shipment.containers), r.paid, r.unpaid, r.age, r.kg, r.revenue / 100, r.cost === null ? null : r.cost / 100])] },
     ];
@@ -109,8 +111,9 @@ export default function Reports() {
         <p className="text-sm text-zinc-600">{num(total?.unpaid || 0)} מיכלים טרם שויכו לתקבול מאושר. אין אומדן כספי למיכלים שטרם תומחרו.</p>
         {traders.map((g) => {
           const open = rows.filter((r) => r.shipment.trader_id === g.key && r.unpaid > 0).sort((a, b) => a.shipment.harvest_date.localeCompare(b.shipment.harvest_date));
-          return <details key={g.key} className="rounded-xl border border-zinc-200 bg-white p-3"><summary className="min-h-11 cursor-pointer"><strong>{traderName(g.key)}</strong><span className="block text-sm">{num(g.unpaid)} מיכלים פתוחים מתוך {num(g.containers)}{open[0] ? ` · הוותיק ביותר: ${open[0].age ?? "—"} ימים` : " · הכל שויך לתשלום"}</span></summary>
-            {open.map((r) => <div key={r.shipment.id} className="border-t border-zinc-100 py-3 text-sm"><p>{dateLabel(r.shipment.harvest_date)} · {varieties[r.shipment.variety_id] || "לא ידוע"} · {plots[r.shipment.plot_id] || "לא ידוע"}</p><p>{num(r.unpaid)} פתוחים מתוך {num(Number(r.shipment.containers))} · שויכו {num(r.paid)} · {r.age ?? "—"} ימים משיווק</p></div>)}
+          const overdue = open.filter(r => isOverdue(r.shipment.harvest_date,Number(r.shipment.containers),r.paid,catalog.settings.overdue_days,today));
+          return <details key={g.key} className="rounded-xl border border-zinc-200 bg-white p-3"><summary className="min-h-11 cursor-pointer"><strong>{traderName(g.key)}</strong><span className="block text-sm">{num(g.unpaid)} מיכלים פתוחים מתוך {num(g.containers)}{open[0] ? ` · הוותיק ביותר: ${open[0].age ?? "—"} ימים` : " · הכל שויך לתשלום"}</span>{overdue.length > 0 && <span className="block text-sm font-semibold text-amber-900">{num(overdue.reduce((sum,r)=>sum+r.unpaid,0))} מיכלים באיחור · {overdue.length} שיווקים</span>}</summary>
+            {open.map((r) => <div key={r.shipment.id} data-report-overdue={overdue.includes(r)||undefined} className={`border-t border-zinc-100 p-2 text-sm ${overdue.includes(r)?"rounded-lg bg-amber-50":""}`}><p>{dateLabel(r.shipment.harvest_date)} · {varieties[r.shipment.variety_id] || "לא ידוע"} · {plots[r.shipment.plot_id] || "לא ידוע"}</p><p>{num(r.unpaid)} פתוחים מתוך {num(Number(r.shipment.containers))} · שויכו {num(r.paid)} · {r.age ?? "—"} ימים משיווק</p>{overdue.includes(r)&&<p className="font-semibold text-amber-900">ממתין לתשלום · מעל {catalog.settings.overdue_days} ימים</p>}</div>)}
           </details>;
         })}
       </div>}
@@ -119,6 +122,7 @@ export default function Reports() {
         <p className="text-xs text-zinc-600">סכומי שורות מאושרות חלקי הנטו ששויך — ממוצע משוקלל, כולל תיקוני סכום בשורה. הפרשים ברמת התקבול אינם נכללים.</p>
         {!prices.length && <p>אין נתוני תשלום מאושרים בסינון הנוכחי.</p>}
         {prices.map((g) => { const [trader, variety] = JSON.parse(g.key); return <div key={g.key} className="flex items-center justify-between gap-3 rounded-xl bg-white p-4"><div className="min-w-0"><h4 className="font-semibold">{traderName(trader)} · {varieties[variety] || "לא ידוע"}</h4><p className="text-xs">{num(g.kg)} ק״ג · {money(g.revenue)}</p></div><p className="shrink-0 text-lg font-bold">{average(g)}<span className="block text-xs font-normal">לק״ג</span></p></div>; })}
+        <MonthlyPriceChart rows={rows} varieties={varieties} />
         <div className="rounded-xl bg-white p-4"><h4 className="mb-3 font-semibold">מגמה חודשית לפי תאריך שיווק</h4>{months.map((g) => <div key={g.key} className="mb-3"><div className="flex justify-between gap-2 text-sm"><span>{g.key}</span><span>{average(g)} לק״ג · {num(g.kg)} ק״ג</span></div><div className="mt-1 h-2 rounded bg-zinc-100"><div className="h-2 rounded bg-green-700" style={{ width: `${Math.max(0, g.revenue / g.kg) / Math.max(1, ...months.map((m) => m.revenue / m.kg)) * 100}%` }} /></div></div>)}</div>
       </div>}
       {tab === "season" && <div className="space-y-4">
