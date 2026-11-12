@@ -1,5 +1,7 @@
 מערכת ניהול מטעי אבוקדו — Next.js, React ו־Supabase.
 
+גיבוי יומי מוצפן ל־OneDrive, הורדה ידנית, גיבוי לפני עדכון מסד ושחזור לסביבה חדשה: [BACKUP_SETUP.md](./BACKUP_SETUP.md).
+
 הפעלת מסך הגדרות המשק, ניהול רשימות, סימון שיווקים פתוחים, פחת ויבול לדונם: [SETTINGS_SETUP.md](./SETTINGS_SETUP.md).
 
 הפעלת דוחות סוחרים, מחירים, סיכום עונה, ייצוא לאקסל ומסמכים פרטיים: [REPORTS_SETUP.md](./REPORTS_SETUP.md).

@@ -1,0 +1,64 @@
+name: Avocado backup
+
+on:
+  schedule:
+    - cron: '23 0 * * *'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Backup purpose'
+        required: true
+        default: manual
+        type: choice
+        options:
+          - manual
+          - before-migration
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/backup.yml'
+      - 'scripts/backup/**'
+      - 'tests/backup.test.mjs'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: avocado-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test encryption and recovery helpers
+        run: node --test tests/backup.test.mjs
+      - name: Prepare PostgreSQL and OneDrive tools
+        run: |
+          docker pull postgres:18
+          docker pull rclone/rclone:1.76.0
+      - name: Test database dump and isolated restore with synthetic data
+        run: node scripts/backup/drill.mjs
+      - name: Back up database and images to OneDrive
+        env:
+          BACKUP_DB_HOST: ${{ secrets.BACKUP_DB_HOST }}
+          BACKUP_DB_USER: ${{ secrets.BACKUP_DB_USER }}
+          BACKUP_DB_PASSWORD: ${{ secrets.BACKUP_DB_PASSWORD }}
+          BACKUP_SUPABASE_URL: ${{ secrets.BACKUP_SUPABASE_URL }}
+          BACKUP_SUPABASE_SECRET_KEY: ${{ secrets.BACKUP_SUPABASE_SECRET_KEY }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+          RCLONE_CONFIG: ${{ secrets.RCLONE_CONFIG }}
+          BACKUP_REASON: ${{ inputs.reason }}
+        run: node scripts/backup/run.mjs
+      - name: Report failure
+        if: failure()
+        run: |
+          echo 'Backup did not finish. Check the failed step; do not run a database update based on this run.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No success marker is written for an incomplete backup.' >> "$GITHUB_STEP_SUMMARY"

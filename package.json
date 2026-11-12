@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test:auth": "node --test tests/auth-permissions.test.mjs",
+    "test:backup": "node --test tests/backup.test.mjs",
     "test:reports": "node --experimental-strip-types --test tests/reports.test.mjs",
     "test:photos": "node --experimental-strip-types --test tests/photos.test.mjs",
     "test:analysis": "node --experimental-strip-types --test tests/analysis.test.mjs",

@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Backup data and credentials must never enter source control.
+/backups/
+/recovered-backup*/
+*.avbackup
+*.avbackup.sha256
+*.avbackup.complete.json
+rclone.conf
