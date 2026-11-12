@@ -18,6 +18,7 @@ const skeleton=`
   CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql AS $$ SELECT null::uuid $$;
   CREATE TABLE auth.users(id uuid primary key,email text,encrypted_password text);
   CREATE TABLE auth.schema_migrations(version text);
+  CREATE TABLE auth.refresh_tokens(id bigserial primary key,user_id uuid references auth.users(id));
   CREATE TABLE storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);
   CREATE TABLE storage.objects(id uuid primary key,bucket_id text,name text,updated_at timestamptz,metadata jsonb,version text);
   ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
@@ -45,6 +46,8 @@ try {
     INSERT INTO auth.users VALUES('00000000-0000-4000-8000-000000000001','synthetic@example.invalid','hashed-synthetic-password');
     UPDATE public.profiles SET role='admin';
     INSERT INTO public.shipments VALUES(1,1.25,2,162.50);
+    INSERT INTO auth.refresh_tokens(user_id) VALUES('00000000-0000-4000-8000-000000000001');
+    SELECT setval('auth.refresh_tokens_id_seq',2500,true);
     INSERT INTO storage.buckets VALUES('farm-documents','farm-documents',false,10485760,ARRAY['image/jpeg']);
   `);
   const snapshot=new Snapshot(root,base);let info;
@@ -67,6 +70,7 @@ try {
   assert.equal(await query('SELECT containers FROM public.shipments'),'2');
   assert.equal(await query('SELECT role FROM public.profiles'),'admin');
   assert.equal(await query('SELECT encrypted_password FROM auth.users'),'hashed-synthetic-password');
+  assert.equal(await query("INSERT INTO auth.refresh_tokens(user_id) VALUES('00000000-0000-4000-8000-000000000001') RETURNING id"),'2501');
   assert.equal(await query("SELECT count(*) FROM pg_policies WHERE schemaname='storage' AND policyname='farm_read'"),'1');
   assert.equal(await query("SELECT count(*) FROM pg_policies WHERE schemaname='public' AND policyname='only_self'"),'1');
   await pg(root,'psql',['-X','-v','ON_ERROR_STOP=1','-c',"INSERT INTO auth.users VALUES('00000000-0000-4000-8000-000000000002','another@example.invalid','hash')"],target);

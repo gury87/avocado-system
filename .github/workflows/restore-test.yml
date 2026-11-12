@@ -3,13 +3,21 @@ name: Avocado restore test
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: 'Restore empty test project, or verify an already restored copy'
+        required: true
+        default: restore-empty
+        type: choice
+        options:
+          - restore-empty
+          - verify-restored
       backup_path:
         description: 'OneDrive backup path inside Avocado-System-Backups'
         required: true
         default: '2026-11-12/2026-11-12T19-46-49.892Z-b4461d23.avbackup'
         type: string
       confirm_empty_test:
-        description: 'RESTORE secrets point to the separate EMPTY test project'
+        description: 'RESTORE secrets point to the separate test project (empty for restore mode)'
         required: true
         default: false
         type: boolean
@@ -41,7 +49,7 @@ jobs:
           docker pull rclone/rclone:1.76.0
       - name: Check the same restore procedure on synthetic data
         run: node scripts/backup/drill.mjs
-      - name: Restore selected backup into the empty test project
+      - name: Restore or verify selected backup in the test project
         env:
           RCLONE_CONFIG: ${{ secrets.RCLONE_CONFIG }}
           BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
@@ -52,6 +60,7 @@ jobs:
           RESTORE_SUPABASE_SECRET_KEY: ${{ secrets.RESTORE_SUPABASE_SECRET_KEY }}
           RESTORE_BACKUP_PATH: ${{ inputs.backup_path }}
           RESTORE_CONFIRM: ${{ inputs.confirm_empty_test }}
+          RESTORE_MODE: ${{ inputs.mode }}
         run: node scripts/backup/restore-job.mjs
       - name: Report failure
         if: failure()

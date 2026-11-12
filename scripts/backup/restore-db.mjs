@@ -16,7 +16,7 @@ try {
   const base=process.env.RESTORE_SUPABASE_URL?.replace(/\/$/,'');
   const url=new URL(base);
   const ref=url.hostname.split('.')[0];
-  if(url.protocol!=='https:'||!/^[a-z0-9]+\.supabase\.co$/.test(url.hostname)||confirmation!==`--confirm-empty-project=${ref}`||ref===manifest.projectRef) throw new Error('Restore requires explicit confirmation of a different, new Supabase project.');
+  if(!manifest.projectRef||url.protocol!=='https:'||!/^[a-z0-9]+\.supabase\.co$/.test(url.hostname)||confirmation!==`--confirm-empty-project=${ref}`||ref===manifest.projectRef) throw new Error('Restore requires explicit confirmation of a different, new Supabase project.');
   for(const name of ['RESTORE_DB_HOST','RESTORE_DB_USER','RESTORE_DB_PASSWORD','RESTORE_SUPABASE_SECRET_KEY']) if(!process.env[name]) throw new Error(`Missing ${name}.`);
   if(process.env.RESTORE_DB_USER!==`postgres.${ref}`||!/^[a-z0-9.-]+\.pooler\.supabase\.com$/.test(process.env.RESTORE_DB_HOST)) throw new Error('Restore database and Storage project do not match.');
   const env={...process.env,PGHOST:process.env.RESTORE_DB_HOST,PGPORT:'5432',PGUSER:process.env.RESTORE_DB_USER,PGPASSWORD:process.env.RESTORE_DB_PASSWORD,PGDATABASE:'postgres',PGSSLMODE:'require',PGCONNECT_TIMEOUT:'30'};

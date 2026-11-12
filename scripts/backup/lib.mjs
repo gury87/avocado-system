@@ -121,7 +121,7 @@ export function restoreList(toc) {
     if (/ SCHEMA - public /.test(line)) return false; // Fresh Supabase already has public.
     if (/ SCHEMA - private /.test(line)) return true;
     if (/ (public|private) /.test(line)) return true;
-    return / TABLE DATA auth /.test(line) && !/ TABLE DATA auth schema_migrations /.test(line);
+    return / SEQUENCE SET auth /.test(line) || (/ TABLE DATA auth /.test(line) && !/ TABLE DATA auth schema_migrations /.test(line));
   });
   if (!lines.some(l => / TABLE public profiles /.test(l)) || !lines.some(l => / TABLE DATA auth users /.test(l))) throw new Error('Archive is missing application or Auth data.');
   return lines.join('\n') + '\n';
