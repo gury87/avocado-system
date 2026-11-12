@@ -43,10 +43,14 @@ test('Restore selection preserves users, permissions and application data withou
     '9; 0 9 ACL public TABLE profiles postgres',
     '10; 1259 10 TABLE auth users supabase_auth_admin',
     '11; 0 11 TABLE DATA storage objects supabase_storage_admin',
+    '12; 826 12 DEFAULT ACL public DEFAULT PRIVILEGES FOR TABLES supabase_admin',
+    '13; 826 13 DEFAULT ACL public DEFAULT PRIVILEGES FOR FUNCTIONS postgres',
   ].join('\n');
   const list=restoreList(toc);
   for(const fragment of ['SCHEMA - private','TABLE public profiles','TABLE DATA auth users','FUNCTION private farm_role','POLICY public profiles','ACL public TABLE profiles'])assert.ok(list.includes(fragment));
   for(const fragment of ['SCHEMA - public','TABLE auth users','TABLE DATA storage','schema_migrations'])assert.ok(!list.includes(fragment));
+  assert.ok(!list.includes('DEFAULT PRIVILEGES FOR TABLES supabase_admin'));
+  assert.ok(list.includes('DEFAULT PRIVILEGES FOR FUNCTIONS postgres'));
   assert.throws(()=>restoreList(''),/missing/);
 });
 
