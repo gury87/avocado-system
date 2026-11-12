@@ -71,3 +71,21 @@ test('Storage paths and API authorization handle secret keys without turning the
 test('Child failures never echo a database password or arbitrary tool stderr',async()=>{
   await assert.rejects(command(process.execPath,['-e',"process.stderr.write('password=DO_NOT_LOG');process.exit(1)"],{label:'Test client'}),e=>e.message.includes('Test client failed')&&!e.message.includes('DO_NOT_LOG'));
 });
+
+test('Standalone recovery CLI decrypts, extracts and verifies a complete package',async()=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'recovery-cli-test-'));
+  try {
+    const {mkdir}=await import('node:fs/promises');
+    const bundle=path.join(root,'bundle');await mkdir(bundle);
+    await writeFile(path.join(bundle,'database.dump'),'synthetic database');
+    await writeFile(path.join(bundle,'manifest.json'),JSON.stringify({format:1,createdAt:'2026-11-12',commit:'synthetic',files:[{path:'database.dump',bytes:18,sha256:await digest(path.join(bundle,'database.dump'))}]}));
+    const archive=path.join(root,'plain.tar.gz'),encrypted=path.join(root,'backup.avbackup'),key=randomBytes(32);
+    await command('tar',['-czf',archive,'-C',bundle,'.']);await encryptFile(archive,encrypted,key);
+    const recovered=path.join(root,'recovered');
+    const env={...process.env,BACKUP_ENCRYPTION_KEY:key.toString('base64')};
+    const result=await command(process.execPath,[path.resolve('scripts/backup/recover.mjs'),encrypted,recovered],{env});
+    assert.ok(result.includes('Recovery package verified'));
+    assert.equal(await readFile(path.join(recovered,'database.dump'),'utf8'),'synthetic database');
+    await assert.rejects(command(process.execPath,[path.resolve('scripts/backup/recover.mjs'),encrypted,recovered],{env}));
+  } finally {await rm(root,{recursive:true,force:true});}
+});

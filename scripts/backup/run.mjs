@@ -106,6 +106,17 @@ async function main() {
   await rclone(['copyto',`/backup/${name}.sha256`,`${remote}/${name}.sha256`]);
   await rclone(['copyto',`${remote}/${name}`,'/backup/readback.avbackup']);
   if(await digest(path.join(artifacts,'readback.avbackup'))!==sha256) throw new Error('OneDrive read-back checksum failed.');
+  // These are public source files only, never a key/config. They let the owner
+  // recover the encrypted code archive even if GitHub is no longer available.
+  stage='recovery tools';
+  const recoveryFiles=[['scripts/backup/lib.mjs','lib.mjs'],['scripts/backup/recover.mjs','recover.mjs'],['scripts/backup/restore-db.mjs','restore-db.mjs'],['BACKUP_SETUP.md','BACKUP_SETUP.md']];
+  for(const [source,file] of recoveryFiles) {
+    await writeFile(path.join(artifacts,file),await readFile(source));
+    const recoveryRemote=`avocado-backups:Avocado-System-Backups/Recovery-Tools/${commit}/${file}`;
+    await rclone(['copyto',`/backup/${file}`,recoveryRemote]);
+    await rclone(['copyto',recoveryRemote,`/backup/check-${file}`]);
+    if(await digest(path.join(artifacts,file))!==await digest(path.join(artifacts,'check-'+file))) throw new Error('Recovery tool read-back verification failed.');
+  }
   const complete={format:1,createdAt,commit,reason:manifest.reason,file:name,sha256,bytes,storageFiles:inventory.objects.length,verifiedUpload:true,restoreDrill:'separate-test-required'};
   await writeFile(path.join(artifacts,name+'.complete.json'),JSON.stringify(complete,null,2));
   await rclone(['copyto',`/backup/${name}.complete.json`,`${remote}/${name}.complete.json`]);
