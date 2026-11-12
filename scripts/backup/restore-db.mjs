@@ -3,7 +3,7 @@ import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { apiHeaders, digest, pg, quoteIdentifier, verifyBundle, storageUrl } from './lib.mjs';
+import { apiHeaders, digest, pg, quoteIdentifier, verifyBundle, storageUrl, restoreArchive } from './lib.mjs';
 
 // Deliberately accepts a *different*, empty project only. No production restore
 // endpoint is exposed by the website or by the scheduled workflow.
@@ -27,7 +27,7 @@ try {
   const major=(await query('SHOW server_version')).split('.')[0];
   if(major!==manifest.inventory.serverVersion.split('.')[0]) throw new Error('Source and target PostgreSQL major versions differ. Use a compatible project.');
   stage='database restore';
-  await pg(root,'pg_restore',['--no-owner','--exit-on-error','--single-transaction',`--use-list=${path.join(root,'restore.list')}`,'--dbname=postgres',path.join(root,'database.dump')],{...env,PGOPTIONS:'-c session_replication_role=replica'});
+  await restoreArchive(root,path.join(root,'database.dump'),path.join(root,'restore.list'),env);
   stage='database row verification';
   for(const table of manifest.inventory.counts) {
     if(Number(await query(`SELECT count(*) FROM ${quoteIdentifier(table.schema)}.${quoteIdentifier(table.name)}`))!==table.count) throw new Error('Restored row counts differ. Keep this test project isolated.');

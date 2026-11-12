@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import os from 'node:os';
 import assert from 'node:assert/strict';
-import { command, pg, restoreList, managedCustomizations } from './lib.mjs';
+import { command, pg, restoreList, managedCustomizations, restoreArchive } from './lib.mjs';
 import { Snapshot } from './database.mjs';
 
 // Runs only against an ephemeral PostgreSQL container with invented data.
@@ -59,7 +59,7 @@ try {
   await pg(root,'psql',['-X','-v','ON_ERROR_STOP=1','-c','CREATE DATABASE recovered'],base);
   const target={...base,PGDATABASE:'recovered'};
   await pg(root,'psql',['-X','-v','ON_ERROR_STOP=1'],target,skeleton);
-  await pg(root,'pg_restore',['--no-owner','--single-transaction','--exit-on-error',`--use-list=${path.join(root,'restore.list')}`,'--dbname=recovered',path.join(root,'database.dump')],{...target,PGOPTIONS:'-c session_replication_role=replica'});
+  await restoreArchive(root,path.join(root,'database.dump'),path.join(root,'restore.list'),target);
   await pg(root,'psql',['-X','-v','ON_ERROR_STOP=1','--file',path.join(root,'managed.sql')],target);
   const query=async sql=>(await pg(root,'psql',['-X','-q','-A','-t','-c',sql],target)).trim();
   assert.equal(await query('SELECT picking_cost FROM public.shipments'),'162.50');

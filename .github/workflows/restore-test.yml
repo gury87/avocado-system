@@ -39,6 +39,8 @@ jobs:
         run: |
           docker pull postgres:18
           docker pull rclone/rclone:1.76.0
+      - name: Check the same restore procedure on synthetic data
+        run: node scripts/backup/drill.mjs
       - name: Restore selected backup into the empty test project
         env:
           RCLONE_CONFIG: ${{ secrets.RCLONE_CONFIG }}

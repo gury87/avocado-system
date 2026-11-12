@@ -94,6 +94,18 @@ export async function pg(root, tool, args, env, input) {
   const spec = pgCommand(root, tool, args, env);
   return command(spec.program, spec.args, { env, input, label: tool });
 }
+export async function restoreArchive(root, archive, list, env) {
+  const sql=path.join(root,'.restore-database.sql');
+  try {
+    await pg(root,'pg_restore',['--no-owner',`--use-list=${list}`,`--file=${sql}`,archive],env);
+    // Supavisor need not forward PGOPTIONS to the backend. SET must run on the
+    // SAME session/transaction as COPY, as in Supabase's documented procedure.
+    await pg(root,'psql',['-X','-v','ON_ERROR_STOP=1','--single-transaction',
+      '--command','SET session_replication_role = replica',
+      '--command',"DO $$ BEGIN IF current_setting('session_replication_role') <> 'replica' THEN RAISE EXCEPTION 'Restore trigger mode is not active'; END IF; END $$",
+      '--file',sql],{...env,PGOPTIONS:''});
+  } finally { await rm(sql,{force:true}); }
+}
 export function quoteIdentifier(value) { return '"' + value.replaceAll('"', '""') + '"'; }
 
 export function restoreList(toc) {
