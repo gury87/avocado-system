@@ -99,7 +99,7 @@ async function main() {
   await writeFile(path.join(configDir,'rclone.conf'),config,{mode:0o600});
   const remote=`avocado-backups:Avocado-System-Backups/${createdAt.slice(0,10)}`;
   async function rclone(args) {
-    return command('docker',['run','--rm','--user',`${process.getuid()}:${process.getgid()}`,'--volume',`${configDir}:/config/rclone`,'--volume',`${artifacts}:/backup`,'rclone/rclone:1.76.0',...args],{label:'OneDrive transfer'});
+    return command('docker',['run','--rm','--user',`${process.getuid()}:${process.getgid()}`,'--volume',`${configDir}:/config/rclone`,'--volume',`${artifacts}:/backup`,'rclone/rclone:1.76.0',...args,'--contimeout','20s','--timeout','90s','--low-level-retries','2'],{label:'OneDrive transfer'});
   }
   stage='OneDrive upload'; console.log('Uploading encrypted files to OneDrive...');
   await rclone(['copyto',`/backup/${name}`,`${remote}/${name}`,'--retries','3']);
@@ -109,14 +109,17 @@ async function main() {
   // These are public source files only, never a key/config. They let the owner
   // recover the encrypted code archive even if GitHub is no longer available.
   stage='recovery tools';
+  console.log('Saving standalone recovery tools...');
+  const toolsDir=path.join(root,'recovery-tools');await mkdir(toolsDir,{mode:0o700});
   const recoveryFiles=[['scripts/backup/lib.mjs','lib.mjs'],['scripts/backup/recover.mjs','recover.mjs'],['scripts/backup/restore-db.mjs','restore-db.mjs'],['BACKUP_SETUP.md','BACKUP_SETUP.md']];
   for(const [source,file] of recoveryFiles) {
-    await writeFile(path.join(artifacts,file),await readFile(source));
-    const recoveryRemote=`avocado-backups:Avocado-System-Backups/Recovery-Tools/${commit}/${file}`;
-    await rclone(['copyto',`/backup/${file}`,recoveryRemote]);
-    await rclone(['copyto',recoveryRemote,`/backup/check-${file}`]);
-    if(await digest(path.join(artifacts,file))!==await digest(path.join(artifacts,'check-'+file))) throw new Error('Recovery tool read-back verification failed.');
+    await writeFile(path.join(toolsDir,file),await readFile(source));
   }
+  await command('tar',['-czf',path.join(artifacts,'recovery-tools.tar.gz'),'-C',toolsDir,'.']);
+  const recoveryRemote=`avocado-backups:Avocado-System-Backups/Recovery-Tools/${commit}/recovery-tools.tar.gz`;
+  await rclone(['copyto','/backup/recovery-tools.tar.gz',recoveryRemote]);
+  await rclone(['copyto',recoveryRemote,'/backup/check-recovery-tools.tar.gz']);
+  if(await digest(path.join(artifacts,'recovery-tools.tar.gz'))!==await digest(path.join(artifacts,'check-recovery-tools.tar.gz'))) throw new Error('Recovery tools read-back verification failed.');
   const complete={format:1,createdAt,commit,reason:manifest.reason,file:name,sha256,bytes,storageFiles:inventory.objects.length,verifiedUpload:true,restoreDrill:'separate-test-required'};
   await writeFile(path.join(artifacts,name+'.complete.json'),JSON.stringify(complete,null,2));
   await rclone(['copyto',`/backup/${name}.complete.json`,`${remote}/${name}.complete.json`]);

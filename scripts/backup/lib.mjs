@@ -61,14 +61,15 @@ export async function decryptFile(source, target, key) {
 
 // Child stderr is deliberately not forwarded: DB clients and HTTP tools can
 // include connection credentials or tokens in their error messages.
-export async function command(program, args, { env = process.env, input, cwd, label = program } = {}) {
+export async function command(program, args, { env = process.env, input, cwd, label = program, timeoutMs = 600000 } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(program, args, { env, cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const timer = setTimeout(() => child.kill(), timeoutMs);
     const parts = []; let size = 0;
     child.stdout.on('data', chunk => { size += chunk.length; if (size < 64 * 1024 * 1024) parts.push(chunk); else child.kill(); });
     child.stderr.resume();
-    child.on('error', () => reject(new Error(`${label} could not start.`)));
-    child.on('close', code => code === 0 ? resolve(Buffer.concat(parts).toString('utf8')) : reject(new Error(`${label} failed (exit ${code}). Check the configured credentials, connectivity and tool version.`)));
+    child.on('error', () => { clearTimeout(timer); reject(new Error(`${label} could not start.`)); });
+    child.on('close', code => { clearTimeout(timer); return code === 0 ? resolve(Buffer.concat(parts).toString('utf8')) : reject(new Error(`${label} failed (exit ${code}). Check the configured credentials, connectivity and tool version.`)); });
     child.stdin.on('error', () => {});
     child.stdin.end(input);
   });
