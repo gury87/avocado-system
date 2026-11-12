@@ -29,9 +29,11 @@ try {
   stage='database restore';
   await restoreArchive(root,path.join(root,'database.dump'),path.join(root,'restore.list'),env);
   stage='database row verification';
-  for(const table of manifest.inventory.counts) {
-    if(Number(await query(`SELECT count(*) FROM ${quoteIdentifier(table.schema)}.${quoteIdentifier(table.name)}`))!==table.count) throw new Error('Restored row counts differ. Keep this test project isolated.');
-  }
+  const expectedCounts=manifest.inventory.counts;
+  if(!expectedCounts.length) throw new Error('Backup has no table inventory.');
+  const countSql=expectedCounts.map((table,index)=>`SELECT ${index} AS id,count(*)::text AS count FROM ${quoteIdentifier(table.schema)}.${quoteIdentifier(table.name)}`).join(' UNION ALL ');
+  const actualCounts=JSON.parse(await query(`SELECT jsonb_agg(c) FROM (${countSql}) c`));
+  if(actualCounts.length!==expectedCounts.length||actualCounts.some(c=>Number(c.count)!==expectedCounts[c.id]?.count)) throw new Error('Restored row counts differ. Keep this test project isolated.');
   stage='Auth triggers and Storage policies';
   await pg(root,'psql',['-X','-v','ON_ERROR_STOP=1','--single-transaction','--file',path.join(root,'managed-customizations.sql')],env);
   const key=process.env.RESTORE_SUPABASE_SECRET_KEY,headers=apiHeaders(key);
