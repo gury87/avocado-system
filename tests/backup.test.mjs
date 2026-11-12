@@ -5,6 +5,7 @@ import { mkdtemp, readFile, writeFile, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { apiHeaders, command, decryptFile, digest, encryptFile, encryptionKey, managedCustomizations, restoreList, safePath, storageUrl, verifyBundle } from '../scripts/backup/lib.mjs';
+import { backupSelection, restoreJob } from '../scripts/backup/restore-job.mjs';
 
 test('Authenticated encryption recovers bytes, randomizes ciphertext and never publishes corrupt recovery output',async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),'backup-test-'));
@@ -70,6 +71,17 @@ test('Storage paths and API authorization handle secret keys without turning the
 
 test('Child failures never echo a database password or arbitrary tool stderr',async()=>{
   await assert.rejects(command(process.execPath,['-e',"process.stderr.write('password=DO_NOT_LOG');process.exit(1)"],{label:'Test client'}),e=>e.message.includes('Test client failed')&&!e.message.includes('DO_NOT_LOG'));
+});
+
+test('Cloud test restore refuses unconfirmed runs and unsafe/unverified backup selection',async()=>{
+  const backup='2026-11-12/example.avbackup';
+  const marker={format:1,verifiedUpload:true,file:'example.avbackup',sha256:'a'.repeat(64),bytes:123};
+  assert.equal(backupSelection(backup,marker),backup);
+  for(const invalid of ['../file.avbackup','2026-11-12/../../file.avbackup','2026-11-12/a.avbackup;echo secret','https://example/file.avbackup']) assert.throws(()=>backupSelection(invalid));
+  assert.throws(()=>backupSelection(backup,{...marker,file:'other.avbackup'}));
+  assert.throws(()=>backupSelection(backup,{...marker,verifiedUpload:false}));
+  const previous=process.env.RESTORE_CONFIRM;delete process.env.RESTORE_CONFIRM;
+  try {await assert.rejects(restoreJob(),/Confirm/);}finally{if(previous!==undefined)process.env.RESTORE_CONFIRM=previous;}
 });
 
 test('Standalone recovery CLI decrypts, extracts and verifies a complete package',async()=>{

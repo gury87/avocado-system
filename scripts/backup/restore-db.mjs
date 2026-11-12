@@ -8,10 +8,11 @@ import { apiHeaders, digest, pg, quoteIdentifier, verifyBundle, storageUrl } fro
 // Deliberately accepts a *different*, empty project only. No production restore
 // endpoint is exposed by the website or by the scheduled workflow.
 let stage='validation';
+let recoveryRoot;
 try {
   const [folder,confirmation]=process.argv.slice(2);
   if(!folder) throw new Error('Supply the recovered bundle directory and --confirm-empty-project=<new-project-ref>.');
-  const root=path.resolve(folder),manifest=await verifyBundle(root);
+  const root=path.resolve(folder),manifest=await verifyBundle(root);recoveryRoot=root;
   const base=process.env.RESTORE_SUPABASE_URL?.replace(/\/$/,'');
   const url=new URL(base);
   const ref=url.hostname.split('.')[0];
@@ -22,7 +23,7 @@ try {
   const query=async sql=>(await pg(root,'psql',['-X','-q','-A','-t','-v','ON_ERROR_STOP=1','-c',sql],env)).trim();
   stage='empty target check';
   const nonempty=Number(await query(`SELECT (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname IN ('public','private') AND c.relkind IN ('r','p') AND NOT EXISTS(SELECT 1 FROM pg_depend d WHERE d.objid=c.oid AND d.deptype='e'))+(SELECT count(*) FROM auth.users)+(SELECT count(*) FROM storage.objects)+(SELECT count(*) FROM storage.buckets)`));
-  if(nonempty) throw new Error('Target is not empty. Restore refused; use a new test project.');
+  if(!Number.isSafeInteger(nonempty)||nonempty!==0) throw new Error('Target is not empty or could not be verified. Restore refused; use a new test project.');
   const major=(await query('SHOW server_version')).split('.')[0];
   if(major!==manifest.inventory.serverVersion.split('.')[0]) throw new Error('Source and target PostgreSQL major versions differ. Use a compatible project.');
   stage='database restore';
@@ -61,4 +62,8 @@ try {
   await writeFile(path.join(root,'restore-verification.json'),JSON.stringify({checkedAt:new Date().toISOString(),targetProject:ref,databaseRowsVerified:true,storageFilesVerified:manifest.inventory.objects.length,applicationChecksRequired:true},null,2));
   console.log('Database counts and restored file hashes verified on the NEW project.');
   console.log('Before switching the website, configure Auth URLs/email, test all roles, receipt totals and image viewing. The live website has NOT been switched.');
-} catch(error) { console.error(`Restore FAILED at ${stage}: ${error instanceof Error?error.message:'Unexpected error.'}`);process.exitCode=1; }
+} catch(error) {
+  const message=error instanceof Error?error.message:'Unexpected error.';
+  if(recoveryRoot) await writeFile(path.join(recoveryRoot,'.restore-failure.json'),JSON.stringify({stage,message})).catch(()=>{});
+  console.error(`Restore FAILED at ${stage}: ${message}`);process.exitCode=1;
+}

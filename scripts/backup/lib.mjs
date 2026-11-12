@@ -65,11 +65,19 @@ export async function command(program, args, { env = process.env, input, cwd, la
   return new Promise((resolve, reject) => {
     const child = spawn(program, args, { env, cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     const timer = setTimeout(() => child.kill(), timeoutMs);
-    const parts = []; let size = 0;
+    const parts = []; let size = 0, databaseHint = '';
     child.stdout.on('data', chunk => { size += chunk.length; if (size < 64 * 1024 * 1024) parts.push(chunk); else child.kill(); });
-    child.stderr.resume();
+    child.stderr.on('data', chunk => {
+      if(label==='pg_restore'||label==='psql') {
+        const text=chunk.toString('utf8');
+        // Whitelisted metadata-only diagnostics, never COPY rows, SQL statements,
+        // connection URLs, passwords, request headers or database error DETAIL.
+        const match=text.match(/ERROR:\s*((?:permission denied for|must be owner of) (?:schema|table|function|sequence|parameter|relation|type|extension) [A-Za-z_][A-Za-z0-9_.]*|(?:schema|relation|role|type|column) "[A-Za-z_][A-Za-z0-9_.]*" (?:already exists|does not exist)|unrecognized configuration parameter "[A-Za-z_][A-Za-z0-9_]*")/);
+        if(match) databaseHint=match[1];
+      }
+    });
     child.on('error', () => { clearTimeout(timer); reject(new Error(`${label} could not start.`)); });
-    child.on('close', code => { clearTimeout(timer); return code === 0 ? resolve(Buffer.concat(parts).toString('utf8')) : reject(new Error(`${label} failed (exit ${code}). Check the configured credentials, connectivity and tool version.`)); });
+    child.on('close', code => { clearTimeout(timer); return code === 0 ? resolve(Buffer.concat(parts).toString('utf8')) : reject(new Error(`${label} failed (exit ${code}). ${databaseHint||'Check the configured credentials, connectivity and tool version.'}`)); });
     child.stdin.on('error', () => {});
     child.stdin.end(input);
   });

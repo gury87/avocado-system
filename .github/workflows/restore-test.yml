@@ -1,0 +1,58 @@
+name: Avocado restore test
+
+on:
+  workflow_dispatch:
+    inputs:
+      backup_path:
+        description: 'OneDrive backup path inside Avocado-System-Backups'
+        required: true
+        default: '2026-11-12/2026-11-12T19-46-49.892Z-b4461d23.avbackup'
+        type: string
+      confirm_empty_test:
+        description: 'RESTORE secrets point to the separate EMPTY test project'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: avocado-restore-test
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    if: ${{ inputs.confirm_empty_test }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test encryption and restore guards
+        run: node --test tests/backup.test.mjs
+      - name: Prepare database and OneDrive tools
+        run: |
+          docker pull postgres:18
+          docker pull rclone/rclone:1.76.0
+      - name: Restore selected backup into the empty test project
+        env:
+          RCLONE_CONFIG: ${{ secrets.RCLONE_CONFIG }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+          RESTORE_DB_HOST: ${{ secrets.RESTORE_DB_HOST }}
+          RESTORE_DB_USER: ${{ secrets.RESTORE_DB_USER }}
+          RESTORE_DB_PASSWORD: ${{ secrets.RESTORE_DB_PASSWORD }}
+          RESTORE_SUPABASE_URL: ${{ secrets.RESTORE_SUPABASE_URL }}
+          RESTORE_SUPABASE_SECRET_KEY: ${{ secrets.RESTORE_SUPABASE_SECRET_KEY }}
+          RESTORE_BACKUP_PATH: ${{ inputs.backup_path }}
+          RESTORE_CONFIRM: ${{ inputs.confirm_empty_test }}
+        run: node scripts/backup/restore-job.mjs
+      - name: Report failure
+        if: failure()
+        run: |
+          echo 'Test restore did not complete. Keep the test project isolated and check the failed stage before retrying.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'A target containing restored data is intentionally refused on a second attempt. No production database credentials are passed to this job.' >> "$GITHUB_STEP_SUMMARY"
