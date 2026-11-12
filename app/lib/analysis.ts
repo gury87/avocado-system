@@ -34,7 +34,7 @@ export function groupLoss(rows:LossRow[]){
   return [...groups.values()].map((g)=>({...g,percent:g.fruitGross>0?g.loss/g.fruitGross*100:null}));
 }
 export function yieldByPlot(rows:ReportRow[],plots:CatalogEntry[]){
-  const groups=new Map<string,{id:string;containers:number;paid:number;net:number;revenue:number}>();
-  for(const row of rows){const id=row.shipment.plot_id,g=groups.get(id)||{id,containers:0,paid:0,net:0,revenue:0};g.containers+=Number(row.shipment.containers);g.paid+=row.paid;g.net+=row.kg;g.revenue+=row.revenue;groups.set(id,g);}
-  return [...groups.values()].map((g)=>{const plot=plots.find((p)=>p.id===g.id),area=plot?.dunam&&plot.dunam>0?plot.dunam:null;return {...g,name:plot?.name||"חלקה לא ידועה",area,containersPerDunam:area?g.containers/area:null,netPerDunam:area?g.net/area:null,revenuePerDunam:area?g.revenue/area:null,partial:g.paid+0.0005<g.containers};});
+  const groups=new Map<string,{id:string;containers:number;physicalContainers:number;paid:number;net:number;revenue:number}>();
+  for(const row of rows){const id=row.shipment.plot_id,g=groups.get(id)||{id,containers:0,physicalContainers:0,paid:0,net:0,revenue:0};g.containers=Math.round((g.containers+Number(row.shipment.harvest_quantity??row.shipment.containers))*100)/100;g.physicalContainers+=Number(row.shipment.containers);g.paid+=row.paid;g.net+=row.kg;g.revenue+=row.revenue;groups.set(id,g);}
+  return [...groups.values()].map((g)=>{const plot=plots.find((p)=>p.id===g.id),area=plot?.dunam&&plot.dunam>0?plot.dunam:null;return {...g,name:plot?.name||"חלקה לא ידועה",area,containersPerDunam:area?g.containers/area:null,netPerDunam:area?g.net/area:null,revenuePerDunam:area?g.revenue/area:null,partial:g.paid+0.0005<g.physicalContainers};});
 }

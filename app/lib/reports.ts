@@ -1,6 +1,6 @@
 import { cents, type ReceiptWorkspace } from "./receipts.ts";
 
-export type ReportShipment = { id: string; harvest_date: string; trader_id: string; variety_id: string; plot_id: string; containers: number; picking_cost: string | number | null };
+export type ReportShipment = { id: string; harvest_date: string; trader_id: string; variety_id: string; plot_id: string; containers: number; harvest_quantity?: number; picking_cost: string | number | null };
 export type ReportData = Omit<ReceiptWorkspace, "shipments"> & { shipments: ReportShipment[] };
 export type ReportFilters = { from: string; to: string; trader: string; variety: string; plot: string };
 export type ReportRow = { shipment: ReportShipment; paid: number; unpaid: number; kg: number; revenue: number; cost: number | null; age: number | null };
@@ -40,12 +40,13 @@ export function buildReport(data: ReportData, filters: ReportFilters, today: str
     });
 }
 
-export type GroupRow = { key: string; containers: number; unpaid: number; kg: number; revenue: number; cost: number; missingCost: number };
+export type GroupRow = { key: string; containers: number; harvestQuantity: number; unpaid: number; kg: number; revenue: number; cost: number; missingCost: number };
 export function groupReport(rows: ReportRow[], keyFor: (row: ReportRow) => string): GroupRow[] {
   const groups = new Map<string, GroupRow>();
   for (const row of rows) {
     const key = keyFor(row);
-    const group = groups.get(key) || { key, containers: 0, unpaid: 0, kg: 0, revenue: 0, cost: 0, missingCost: 0 };
+    const group = groups.get(key) || { key, containers: 0, harvestQuantity: 0, unpaid: 0, kg: 0, revenue: 0, cost: 0, missingCost: 0 };
+    group.harvestQuantity = Math.round((group.harvestQuantity + Number(row.shipment.harvest_quantity ?? row.shipment.containers))*100)/100;
     group.containers += Number(row.shipment.containers); group.unpaid += row.unpaid; group.kg += row.kg;
     group.revenue += row.revenue; group.cost += row.cost || 0; group.missingCost += row.cost === null ? 1 : 0;
     groups.set(key, group);

@@ -193,12 +193,12 @@ export default function Receipts({ onChanged, onDirtyChange }: { onChanged: () =
           {item.adjustment_reason && <p className="break-words">הסבר להפרש: {item.adjustment_reason}</p>}
           {item.lines.map((line, index) => <div key={line.id} className="space-y-1 rounded-xl bg-zinc-50 p-3">
             <p className="font-medium">שורה {index + 1} · {dateLabel(line.trader_date)} · {varieties[line.variety_id]}</p>
-            <p>{line.containers} מיכלים · ברוטו {line.gross_weight} ק״ג · נטו {line.net_weight} ק״ג</p>
+            <p>{line.containers} מיכלים פיזיים · ברוטו {line.gross_weight} ק״ג · נטו {line.net_weight} ק״ג</p>
             <p>משקל מיכל {line.tare_weight} ק״ג · מחיר לק״ג ₪{line.price_per_kg} · סכום {money(cents(line.amount))}</p>
             <WeightBreakdown line={line}/>
             {line.allocations.map((allocation) => {
               const shipment = workspace.shipments.find((record) => record.id === allocation.harvest_event_id);
-              return <p key={allocation.harvest_event_id} className="text-xs text-zinc-600">שיווק {shipment ? `${dateLabel(shipment.harvest_date)} · ${plots[shipment.plot_id] || "חלקה לא ידועה"}` : allocation.harvest_event_id}: {allocation.containers} מיכלים · {allocation.net_weight} ק״ג נטו</p>;
+              return <p key={allocation.harvest_event_id} className="text-xs text-zinc-600">שיווק {shipment ? `${dateLabel(shipment.harvest_date)} · ${plots[shipment.plot_id] || "חלקה לא ידועה"}` : allocation.harvest_event_id}: {allocation.containers} מיכלים פיזיים · {allocation.net_weight} ק״ג נטו</p>;
             })}
           </div>)}
           {item.status === "cancelled" ? <p className="text-red-700">סיבת ביטול: {item.cancellation_reason}</p> : <div className="flex flex-wrap gap-2">

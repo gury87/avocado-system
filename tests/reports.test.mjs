@@ -59,3 +59,17 @@ test("Monthly prices weight kg, split varieties and retain missing-month gaps", 
   assert.equal(chart.series[1].points[1].price,3);
   assert.deepEqual(monthlyVarietyPrices([]),{months:[],series:[]});
 });
+
+test("Fractional harvest totals stay separate from physical receipt balances", () => {
+  const fractional={...data,shipments:[{...shipments[0],containers:2,harvest_quantity:1.25,picking_cost:"162.50"}],receipts:[
+    {status:"confirmed",lines:[line("300",[["1",1,100]])]}
+  ]};
+  const [partial]=buildReport(fractional,filters,"2026-11-12");
+  assert.equal(partial.unpaid,1);
+  const [g]=groupReport([partial],()=> "all");
+  assert.equal(g.harvestQuantity,1.25);assert.equal(g.containers,2);assert.equal(g.cost,16250);
+  fractional.receipts[0].lines.push(line("150",[["1",1,50]]));
+  const [full]=buildReport(fractional,filters,"2026-11-12");
+  assert.equal(full.unpaid,0);assert.equal(full.kg,150);
+  assert.equal(groupReport([full],()=>"all")[0].harvestQuantity,1.25);
+});

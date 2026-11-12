@@ -51,7 +51,7 @@ export default function ReceiptLineEditor({ receipt, line, position, workspace, 
         <label className="min-w-0 text-sm">תאריך אצל הסוחר<input type="date" value={line.trader_date} onChange={(e) => update("trader_date", e.target.value)} className={inputClass} /></label>
         <label className="min-w-0 text-sm">זן<select value={line.variety_id} onChange={(e) => update("variety_id", e.target.value)} className={inputClass}>{catalogOptions(catalog.varieties,original?.lines.find((l)=>l.id===line.id)?.variety_id).map((e) => <option key={e.id} value={e.id}>{e.name}{e.active?"":" (לא פעיל)"}</option>)}</select></label>
         {([
-          ["gross_weight", "משקל ברוטו (ק״ג)", "0.001"], ["containers", "מספר מיכלים", "0.001"],
+          ["gross_weight", "משקל ברוטו (ק״ג)", "0.001"], ["containers", "מספר מיכלים פיזיים", "0.001"],
           ["tare_weight", "משקל מיכל בודד (ק״ג)", "0.001"], ["net_weight", "משקל נטו (ק״ג)", "0.001"],
           ["price_per_kg", "מחיר לק״ג (₪)", "0.0001"], ["amount", "סכום לפי מסמך הסוחר (₪)", "0.01"],
         ] as const).map(([key, label, step]) => <label key={key} className="min-w-0 text-sm">{label}<input type="number" inputMode="decimal" min="0" step={step} value={line[key]} onChange={(e) => update(key, e.target.value)} className={inputClass} /></label>)}
@@ -62,6 +62,7 @@ export default function ReceiptLineEditor({ receipt, line, position, workspace, 
 
       <div className="space-y-3 border-t border-zinc-200 pt-3">
         <h3 className="font-semibold">שיוך לשיווקים</h3>
+        <p className="text-xs text-zinc-500">הכמויות בשורה ובשיוכים הן מיכלים פיזיים, גם כשהקוטף דיווח על מיכל חלקי. משקל המיכלים מנוכה לפי הכמות הפיזית.</p>
         <p className="text-xs text-zinc-500">הצעות בלבד — השיוך מתבצע בלחיצה שלך. בפיצול בין שיווקים יש לאשר את חלוקת המיכלים והנטו.</p>
         {line.allocations.map((allocation, index) => {
           const shipment = workspace.shipments.find((item) => item.id === allocation.harvest_event_id);
@@ -70,7 +71,7 @@ export default function ReceiptLineEditor({ receipt, line, position, workspace, 
             <p className="text-sm">{shipment ? `${dateLabel(shipment.harvest_date)} · ${varieties[shipment.variety_id]} · ${plots[shipment.plot_id] || "חלקה לא ידועה"}` : "שיווק לא זמין"}</p>
             {candidate && <p className="text-xs text-zinc-600">ניתן לשייך לשורה זו עד {candidate.available} מיכלים</p>}
             <div className="grid grid-cols-2 gap-2">
-              {([ ["containers", "מיכלים בשיוך"], ["net_weight", "נטו בשיוך (ק״ג)"] ] as const).map(([key, label]) => <label key={key} className="min-w-0 text-xs">{label}<input type="number" inputMode="decimal" min={key === "containers" ? "0.001" : "0"} step="0.001" value={allocation[key]} className={inputClass} onChange={(e) => onChange({ ...line, allocations: line.allocations.map((item, i) => i === index ? { ...item, [key]: e.target.value } : item) })} /></label>)}
+              {([ ["containers", "מיכלים פיזיים בשיוך"], ["net_weight", "נטו בשיוך (ק״ג)"] ] as const).map(([key, label]) => <label key={key} className="min-w-0 text-xs">{label}<input type="number" inputMode="decimal" min={key === "containers" ? "0.001" : "0"} step="0.001" value={allocation[key]} className={inputClass} onChange={(e) => onChange({ ...line, allocations: line.allocations.map((item, i) => i === index ? { ...item, [key]: e.target.value } : item) })} /></label>)}
             </div>
             <button type="button" className="min-h-11 text-sm text-red-700" onClick={() => onChange({ ...line, allocations: line.allocations.filter((_, i) => i !== index) })}>הסר שיוך</button>
           </div>;
@@ -80,7 +81,8 @@ export default function ReceiptLineEditor({ receipt, line, position, workspace, 
         </p>
         {shown.filter((candidate) => !line.allocations.some((allocation) => allocation.harvest_event_id === candidate.id)).map((candidate) => <div key={candidate.id} className="rounded-lg border border-zinc-200 p-3 text-sm">
           <p className="font-medium">{dateLabel(candidate.harvest_date)} · {plots[candidate.plot_id] || "חלקה לא ידועה"}</p>
-          <p>{candidate.available} מיכלים זמינים לשורה</p>
+          <p>{candidate.available} מיכלים פיזיים זמינים לשורה</p>
+          {candidate.harvest_quantity != null && Number(candidate.harvest_quantity) !== candidate.containers && <p className="text-xs text-zinc-500">דיווח קטיף: {candidate.harvest_quantity} מיכלים · נמסרו {candidate.containers} פיזיים</p>}
           <p className="text-xs text-zinc-500">זן וסוחר תואמים{candidate.exact ? " · כמות מיכלים תואמת" : ""}{candidate.days !== null ? ` · הפרש ${Math.abs(candidate.days)} ימים${candidate.days < 0 ? " (השיווק מאוחר מתאריך הסוחר)" : ""}` : ""}</p>
           <button type="button" onClick={() => addAllocation(candidate.id)} className="mt-2 min-h-11 w-full rounded-lg bg-zinc-900 px-3 text-white">שייך לשורה</button>
         </div>)}

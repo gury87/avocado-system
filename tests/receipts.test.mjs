@@ -367,5 +367,79 @@ test("Receipt SQL enforces atomic accounting, permissions and allocation limits"
       assert.equal((await db.query("select picking_rate from harvest_events where id=2")).rows[0].picking_rate,null);
       assert.ok((await asUser(admin,"select * from audit_log where action='shipment_picking_updated'")).length);
     });
+    await t.test("Any confirmed payment locks shipment fields except plot, including legacy RPCs", async () => {
+      await db.exec(await read("supabase/migrations/010_paid_shipment_edit_lock.sql"));
+      await db.exec("update varieties set farm_active=true where id=2");
+      const [shipment] = await asUser(worker,"insert into harvest_events(trader_id,harvest_date,variety_id,plot_id,containers,container_size) values(1,'2026-10-01',1,1,2,'קטן') returning id::text as id");
+      const state = async () => (await asUser(worker,"select get_shipment_edit_state($1) as s",[shipment.id]))[0].s.has_payment;
+      assert.equal(await state(),false);
+      await edit(worker,shipment.id,0,"2026-10-02",2,1,3);
+      const item=receipt([line({shipment:shipment.id,variety:"2"})]);
+      item.version=(await save(item,false)).version;
+      assert.equal(await state(),false,"A linked draft is not a payment");
+      item.version=(await save(item)).version;
+      assert.equal(await state(),true,"Even a partial payment locks the whole shipment");
+      await assert.rejects(edit(worker,shipment.id,1,"2026-10-03",2,1,3),/PAID_SHIPMENT_LOCKED/);
+      await assert.rejects(edit(admin,shipment.id,1,"2026-10-02",2,1,4),/PAID_SHIPMENT_LOCKED/);
+      await assert.rejects(edit(worker,shipment.id,1,"2026-10-02",2,1,2),/PAID_SHIPMENT_LOCKED/);
+      await assert.rejects(edit(admin,shipment.id,1,"2026-10-02",1,1,3),/LINKED_VARIETY|PAID_SHIPMENT_LOCKED/);
+      await assert.rejects(asUser(admin,"select edit_farm_shipment_with_picking($1,1,'2026-10-02',2,1,3,'1',25)",[shipment.id]),/PAID_SHIPMENT_LOCKED/);
+      assert.equal((await asUser(admin,"select edit_version from harvest_events where id::text=$1",[shipment.id]))[0].edit_version,1,"Failed wrapper update rolls back all intermediate writes");
+      await edit(worker,shipment.id,1,"2026-10-02",2,2,3);
+      await assert.rejects(asUser(viewer,"select get_shipment_edit_state($1)",[shipment.id]),/FORBIDDEN/);
+      await asUser(admin,"select cancel_farm_receipt($1,$2,'בדיקת ביטול')",[item.id,item.version]);
+      assert.equal(await state(),false);
+      await edit(worker,shipment.id,2,"2026-10-03",1,2,4);
+    });
+
+    await t.test("Fractional harvest preserves history, bills reported quantity and allocates physical containers", async () => {
+      // Rerunning 010 must also be safe when the operator is unsure it ran.
+      await db.exec(await read("supabase/migrations/010_paid_shipment_edit_lock.sql"));
+      const before=(await db.query("select id,containers,picking_cost,picking_rate,edit_version from harvest_events order by id")).rows;
+      await db.exec(await read("supabase/migrations/011_fractional_harvest_quantity.sql"));
+      assert.deepEqual((await db.query("select id,containers,picking_cost,picking_rate,edit_version from harvest_events order by id")).rows,before);
+      assert.equal((await db.query("select count(*)::int as n from harvest_events where harvest_quantity is distinct from containers")).rows[0].n,0);
+      const version=(await asUser(admin,"select get_farm_catalog() as c"))[0].c.settings.version;
+      await asUser(admin,"select admin_save_farm_settings_with_picking($1,14,10,130,150)",[version]);
+      const insert=async(quantity,user=worker)=>(await asUser(user,"insert into harvest_events(trader_id,harvest_date,variety_id,plot_id,containers,harvest_quantity,container_size,picking_cost) values(1,'2026-11-01',1,1,99,$1,'קטן',0) returning id::text as id,containers,harvest_quantity,picking_cost",[quantity]))[0];
+      for(const invalid of [0,-1,1.251,1000000.01,"NaN"])await assert.rejects(insert(invalid),/INVALID_SHIPMENT/);
+      await assert.rejects(insert(1.25,viewer),/row-level security/);
+      for(const [q,physical] of [[0.01,1],[0.25,1],[0.5,1],[0.75,1],[1,1],[1.25,2],[1.99,2],[2,2],[2.01,3]]){
+        const s=await insert(q);assert.equal(Number(s.containers),physical);assert.equal(Number(s.harvest_quantity),q);assert.equal(Number(s.picking_cost),Math.round(q*13000)/100);
+      }
+      const s=await insert(1.25);
+      const change=async(user,version,quantity,plot=1,rate=null)=>(await asUser(user,"select edit_farm_shipment_quantity($1,$2,'2026-11-01',1,$3,$4,'1',$5) as s",[s.id,version,plot,quantity,rate]))[0].s;
+      assert.equal(Number(s.picking_cost),162.5);
+      assert.equal(Number((await change(worker,0,1.75)).picking_cost),227.5);
+      assert.equal(Number((await change(worker,1,0.25)).containers),1);
+      await assert.rejects(change(worker,2,1.256),/INVALID_SHIPMENT/);
+      await assert.rejects(change(viewer,2,1.25),/FORBIDDEN/);
+      await assert.rejects(change(worker,2,1.25,1,99),/FORBIDDEN/);
+      await change(worker,2,1.25);
+      // An old tab changing a plot must not overwrite 1.25 with its physical 2.
+      await asUser(worker,"select edit_farm_shipment_with_picking($1,3,'2026-11-01',1,2,2,'1',null)",[s.id]);
+      let stored=(await asUser(worker,"select * from harvest_events where id::text=$1",[s.id]))[0];
+      assert.equal(Number(stored.harvest_quantity),1.25);assert.equal(Number(stored.picking_cost),162.5);
+      await change(admin,4,1.25,1,140);
+      assert.equal(Number((await change(admin,5,1.25,1,130)).picking_cost),162.5);
+      const partial=receipt([line({shipment:s.id,variety:"1",containers:"1",net:"100"})]);
+      await save(partial);
+      assert.equal(Number((await weights()).find(w=>w.harvest_event_id===s.id).containers),1);
+      await assert.rejects(change(worker,6,1.5),/PAID_SHIPMENT_LOCKED/);
+      await assert.rejects(change(worker,6,0.5),/PAID_SHIPMENT_LOCKED|BELOW_PAID_CONTAINERS/);
+      // Plot-only edits of paid fractional shipments preserve both quantities.
+      await change(worker,6,1.25,2);
+      const second=receipt([line({shipment:s.id,variety:"1",containers:"1",net:"50"})]);
+      await save(second);
+      const capacity=(await asUser(admin,"select get_receipt_workspace() as d"))[0].d.shipments.find(h=>h.id===s.id);
+      assert.equal(Number(capacity.containers),2);assert.equal(Number(capacity.harvest_quantity),1.25);assert.equal(Number(capacity.used_containers),2);
+      await assert.rejects(save(receipt([line({shipment:s.id,variety:"1",containers:"1"})])),/CONTAINER_CAPACITY_EXCEEDED/);
+      const report=(await asUser(admin,"select get_farm_reports() as d"))[0].d.shipments.find(h=>h.id===s.id);
+      assert.equal(Number(report.harvest_quantity),1.25);assert.equal(Number(report.containers),2);
+      assert.equal(Number(report.picking_cost),162.5);
+      // A legacy insert without the new column remains supported.
+      const [legacy]=await asUser(worker,"insert into harvest_events(trader_id,harvest_date,variety_id,plot_id,containers,container_size) values(1,'2026-11-01',1,1,2,'קטן') returning harvest_quantity,picking_cost");
+      assert.equal(Number(legacy.harvest_quantity),2);assert.equal(Number(legacy.picking_cost),260);
+    });
   } finally { await db.close(); }
 });

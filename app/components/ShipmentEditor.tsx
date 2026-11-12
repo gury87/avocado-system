@@ -9,7 +9,7 @@ import { useAuth } from "./AuthGate";
 import Documents from "./Documents";
 
 export type EditableShipment = {
-  id: string; date: string; variety: string; plot: string; containers: number;
+  id: string; date: string; variety: string; plot: string; containers: number; physicalContainers: number;
   varietyId: number; plotId: number; editVersion: number; traderId: string; pickingRate: number | null; pickingCost: number | null;
 };
 
@@ -39,6 +39,23 @@ export default function ShipmentEditor({ shipment, onClose, onSaved, onDirtyChan
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [hasPayment, setHasPayment] = useState(false);
+  const [loadingPayment, setLoadingPayment] = useState(true);
+  const [paymentError, setPaymentError] = useState(false);
+  const loadPaymentState = useCallback(async () => {
+    setLoadingPayment(true); setPaymentError(false);
+    try {
+      const { data, error } = await supabase.rpc("get_shipment_edit_state", { target_id: shipment.id });
+      if (error || typeof data?.has_payment !== "boolean") throw error || new Error("Invalid edit state");
+      setHasPayment(data.has_payment);
+    } catch { setPaymentError(true); }
+    finally { setLoadingPayment(false); }
+  }, [shipment.id]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void loadPaymentState(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadPaymentState]);
+  const detailsLocked = hasPayment || loadingPayment || paymentError;
   useEffect(() => {
     const root = document.documentElement;
     const previousOverflow = root.style.overflow;
@@ -62,12 +79,12 @@ export default function ShipmentEditor({ shipment, onClose, onSaved, onDirtyChan
     className="fixed inset-auto top-1/2 m-0 -translate-y-1/2 min-w-0 max-h-[90dvh] overflow-x-hidden overflow-y-auto rounded-2xl bg-white p-5 text-zinc-900 backdrop:bg-black/40">
     <form className="min-w-0 space-y-4" onSubmit={async (event) => {
       event.preventDefault();
-      if (busy || !["admin", "worker"].includes(profile.role)) return;
+      if (busy || loadingPayment || paymentError || !["admin", "worker"].includes(profile.role)) return;
       if (loadingTraders || tradersError || !traders.some((trader) => trader.id === form.trader)) { setError("יש לבחור סוחר מהרשימה לפני השמירה."); return; }
-      if (!window.confirm(["לשמור את השינויים בשיווק?", `סוחר: ${traders.find((trader) => trader.id === form.trader)?.name}`, `תאריך: ${dateLabel(form.date)}`, `זן: ${varieties[form.variety]}`, `חלקה: ${plots[form.plot]}`, `מיכלים: ${form.containers}`, ...(profile.role === "admin" && form.pickingRate !== "" ? [`עלות קטיף למיכל: ${form.pickingRate} ₪`] : [])].join("\n"))) return;
+      if (!window.confirm(["לשמור את השינויים בשיווק?", `סוחר: ${traders.find((trader) => trader.id === form.trader)?.name}`, `תאריך: ${dateLabel(form.date)}`, `זן: ${varieties[form.variety]}`, `חלקה: ${plots[form.plot]}`, `מיכלים בקטיף: ${form.containers} · ${Math.ceil(Number(form.containers))} פיזיים`, ...(profile.role === "admin" && form.pickingRate !== "" ? [`עלות קטיף למיכל: ${form.pickingRate} ₪`] : [])].join("\n"))) return;
       setBusy(true); setError("");
       try {
-        const { data, error: saveError } = await supabase.rpc("edit_farm_shipment_with_picking", {
+        const { data, error: saveError } = await supabase.rpc("edit_farm_shipment_quantity", {
           target_id: shipment.id, expected_version: shipment.editVersion, new_date: form.date,
           new_variety_id: Number(form.variety), new_plot_id: Number(form.plot), new_containers: Number(form.containers),
           new_trader_id: form.trader,
@@ -76,11 +93,13 @@ export default function ShipmentEditor({ shipment, onClose, onSaved, onDirtyChan
         if (saveError) throw saveError;
         onDirtyChange(false);
         await onSaved({ ...shipment, date: form.date, varietyId: Number(form.variety), plotId: Number(form.plot),
-          variety: varieties[form.variety], plot: plots[form.plot], containers: Number(form.containers), editVersion: data.edit_version, traderId: form.trader, pickingRate: data.picking_rate == null ? null : Number(data.picking_rate), pickingCost: data.picking_cost == null ? null : Number(data.picking_cost) });
+          variety: varieties[form.variety], plot: plots[form.plot], containers: Number(data.harvest_quantity), physicalContainers: Number(data.containers), editVersion: data.edit_version, traderId: form.trader, pickingRate: data.picking_rate == null ? null : Number(data.picking_rate), pickingCost: data.picking_cost == null ? null : Number(data.picking_cost) });
         onClose();
       } catch (cause) {
         const message = cause && typeof cause === "object" && "message" in cause ? String(cause.message) : "";
-        setError(message.includes("LINKED_TRADER") ? "לא ניתן לשנות סוחר בשיווק המשויך לטיוטה או לתקבול מאושר. יש לתקן או לבטל את השיוך בתקבול תחילה."
+        if (message.includes("PAID_SHIPMENT_LOCKED")) { void loadPaymentState(); }
+        setError(message.includes("PAID_SHIPMENT_LOCKED") ? "לשיווק כבר שויך תשלום. ניתן לשנות רק את החלקה. סגור ופתח מחדש את העריכה."
+          : message.includes("LINKED_TRADER") ? "לא ניתן לשנות סוחר בשיווק המשויך לטיוטה או לתקבול מאושר. יש לתקן או לבטל את השיוך בתקבול תחילה."
           : message.includes("INVALID_TRADER") ? "הסוחר שנבחר אינו זמין. סגור את העריכה ופתח אותה מחדש."
           : message.includes("INACTIVE_CATALOG") ? "החלקה או הזן הוצאו משימוש. בחר ערך פעיל ורענן את הנתונים."
           : message.includes("LINKED_VARIETY") ? "לא ניתן לשנות זן בשיווק המשויך לתקבול פעיל. יש לתקן את השיוך בתקבול תחילה."
@@ -91,18 +110,21 @@ export default function ShipmentEditor({ shipment, onClose, onSaved, onDirtyChan
       } finally { setBusy(false); }
     }}>
       <h2 id="shipment-edit-title" className="text-xl font-semibold">עריכת שיווק</h2>
+      {loadingPayment && <p role="status" className="text-sm">בודק שיוך לתשלום…</p>}
+      {hasPayment && <p className="rounded-lg bg-amber-50 p-3 text-sm">לשיווק זה שויך תשלום. ניתן לערוך רק את החלקה.</p>}
+      {paymentError && <p role="alert" className="text-sm text-red-700">לא ניתן לבדוק שיוך לתשלום. <button type="button" className="min-h-11 underline" onClick={() => { void loadPaymentState(); }}>נסה שוב</button></p>}
       <fieldset disabled={busy} className="min-w-0 space-y-3 disabled:opacity-50">
-        <label className="block text-sm">סוחר<select required disabled={loadingTraders || tradersError} value={form.trader} onChange={(e) => update("trader", e.target.value)} className={inputClass}>
+        <label className="block text-sm">סוחר<select required disabled={detailsLocked || loadingTraders || tradersError} value={form.trader} onChange={(e) => update("trader", e.target.value)} className={inputClass}>
           <option value="">{loadingTraders ? "טוען סוחרים…" : "בחר סוחר"}</option>
           {form.trader && !traders.some((trader) => trader.id === form.trader) && <option value={form.trader}>{loadingTraders ? "טוען סוחר…" : `סוחר ${form.trader}`}</option>}
           {traders.map((trader) => <option key={trader.id} value={trader.id}>{trader.name}</option>)}
         </select></label>
         {tradersError && <p role="alert" className="text-sm text-red-700">לא ניתן לטעון סוחרים. <button type="button" onClick={() => { void loadTraders(); }} className="min-h-11 underline">נסה שוב</button></p>}
-        <label className="block text-sm">תאריך שיווק<input required type="date" value={form.date} onChange={(e) => update("date", e.target.value)} className={inputClass} /></label>
-        <label className="block text-sm">זן<select value={form.variety} onChange={(e) => update("variety", e.target.value)} className={inputClass}>{catalogOptions(catalog.varieties,String(shipment.varietyId)).map((e) => <option key={e.id} value={e.id}>{e.name}{e.active?"":" (לא פעיל)"}</option>)}</select></label>
+        <label className="block text-sm">תאריך שיווק<input required disabled={detailsLocked} type="date" value={form.date} onChange={(e) => update("date", e.target.value)} className={inputClass} /></label>
+        <label className="block text-sm">זן<select disabled={detailsLocked} value={form.variety} onChange={(e) => update("variety", e.target.value)} className={inputClass}>{catalogOptions(catalog.varieties,String(shipment.varietyId)).map((e) => <option key={e.id} value={e.id}>{e.name}{e.active?"":" (לא פעיל)"}</option>)}</select></label>
         <label className="block text-sm">חלקה<select value={form.plot} onChange={(e) => update("plot", e.target.value)} className={inputClass}>{catalogOptions(catalog.plots,String(shipment.plotId)).map((e) => <option key={e.id} value={e.id}>{e.name}{e.active?"":" (לא פעיל)"}</option>)}</select></label>
-        <label className="block text-sm">מספר מיכלים<input required type="number" inputMode="numeric" min="1" max="1000000" step="1" value={form.containers} onChange={(e) => update("containers", e.target.value)} className={inputClass} /></label>
-        <label className="block text-sm">עלות קטיף למיכל (₪)<input disabled={profile.role !== "admin"} type="number" inputMode="decimal" min="0" max="1000000" step="any" value={form.pickingRate} onChange={(e)=>update("pickingRate",e.target.value)} className={inputClass} placeholder="עלות היסטורית חסרה" /></label>
+        <label className="block text-sm">מספר מיכלים<input required disabled={detailsLocked} type="number" inputMode="decimal" min="0.01" max="1000000" step="0.01" value={form.containers} onChange={(e) => update("containers", e.target.value)} className={inputClass} /></label>
+        <label className="block text-sm">עלות קטיף למיכל (₪)<input disabled={detailsLocked || profile.role !== "admin"} type="number" inputMode="decimal" min="0" max="1000000" step="any" value={form.pickingRate} onChange={(e)=>update("pickingRate",e.target.value)} className={inputClass} placeholder="עלות היסטורית חסרה" /></label>
         <p className="text-sm">סה״כ עלות קטיף: {form.pickingRate === "" ? (Number(form.containers) === shipment.containers && shipment.pickingCost != null ? shipment.pickingCost.toLocaleString("he-IL")+" ₪" : "חסר נתון") : (Math.round(Number(form.pickingRate)*Number(form.containers)*100)/100).toLocaleString("he-IL")+" ₪"}</p>
         <p className="text-xs text-zinc-500">שינוי תעריף בשיווק זה בלבד, למנהל בלבד. ברירת המחדל לשיווקים חדשים אינה משתנה.</p>
       </fieldset>
@@ -110,7 +132,7 @@ export default function ShipmentEditor({ shipment, onClose, onSaved, onDirtyChan
       <Documents kind="shipment" id={shipment.id} onBusyChange={(working) => { setBusy(working); onDirtyChange(working || dirty); }} />
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
       <div className="grid grid-cols-2 gap-2">
-        <button disabled={busy || loadingTraders || tradersError} type="submit" className="min-h-11 rounded-xl bg-zinc-900 p-3 text-white disabled:opacity-50">{busy ? "שומר…" : "שמור שינויים"}</button>
+        <button disabled={busy || loadingPayment || paymentError || loadingTraders || tradersError} type="submit" className="min-h-11 rounded-xl bg-zinc-900 p-3 text-white disabled:opacity-50">{busy ? "שומר…" : "שמור שינויים"}</button>
         <button disabled={busy} type="button" onClick={close} className="min-h-11 rounded-xl border border-zinc-300 p-3">ביטול</button>
       </div>
     </form>

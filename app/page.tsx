@@ -22,6 +22,7 @@ type Shipment = {
   variety: string;
   plot: string;
   containers: number;
+  physicalContainers: number;
   size: string;
   picker: string;
   varietyId: number;
@@ -56,7 +57,7 @@ function FarmApp() {
   const paidShipmentIds = new Set((paidWeights || []).filter((item) => item.containers > 0).map((item) => item.harvest_event_id));
   const [weightsError, setWeightsError] = useState(false);
   const paidByShipment=new Map(paidWeights?.map((p)=>[p.harvest_event_id,p.containers])||[]);
-  const overdueIds=new Set(paidWeights&&!weightsError?shipments.filter((s)=>isOverdue(s.date,s.containers,paidByShipment.get(s.id)||0,catalog.settings.overdue_days,farmToday)).map((s)=>s.id):[]);
+  const overdueIds=new Set(paidWeights&&!weightsError?shipments.filter((s)=>isOverdue(s.date,s.physicalContainers,paidByShipment.get(s.id)||0,catalog.settings.overdue_days,farmToday)).map((s)=>s.id):[]);
   const [receiptsDirty, setReceiptsDirty] = useState(false);
   const [settingsDirty, setSettingsDirty] = useState(false);
   const selectTab = (tab: typeof activeTab) => {
@@ -142,7 +143,7 @@ function FarmApp() {
   const loadShipments = useCallback(async () => {
     const records: {
       id: string | number; harvest_date: string; variety_id: number; plot_id: number;
-      containers: number; container_size: string; edit_version?: number; trader_id: string | number | null; picking_rate?: number | null; picking_cost?: number | null;
+      harvest_quantity?: number; containers: number; container_size: string; edit_version?: number; trader_id: string | number | null; picking_rate?: number | null; picking_cost?: number | null;
     }[] = [];
     // Fetch all pages so the dashboard is not limited by the REST row cap.
     for (let offset = 0; ; offset += 500) {
@@ -170,7 +171,8 @@ function FarmApp() {
       date: record.harvest_date,
       variety: varieties[String(record.variety_id)] || "זן לא ידוע",
       plot: plots[String(record.plot_id)] || "חלקה לא ידועה",
-      containers: Number(record.containers),
+      containers: Number(record.harvest_quantity ?? record.containers),
+      physicalContainers: Number(record.containers),
       size: record.container_size, // Use the value directly from Supabase
       picker: "נביל", // Assuming picker is static for now
       varietyId: Number(record.variety_id),
@@ -193,6 +195,7 @@ function FarmApp() {
 
   const addShipment = async () => {
     if (!canCreate) return;
+    if (!Number.isFinite(form.containers) || form.containers <= 0 || form.containers > 1000000 || Math.abs(form.containers * 100 - Math.round(form.containers * 100)) > 0.000001) { alert("יש להזין כמות מיכלים חיובית עם עד שתי ספרות אחרי הנקודה."); return; }
     if (!catalog.varieties.some((e)=>e.id===form.variety&&e.active)||!catalog.plots.some((e)=>e.id===form.plot&&e.active)) { alert("יש לבחור חלקה וזן פעילים."); return; }
     const confirmationMessage = [
       "האם לשמור את השיווק הבא?",
@@ -200,7 +203,7 @@ function FarmApp() {
       `תאריך: ${form.date.split("-").reverse().join("/")}`,
       `זן: ${varieties[form.variety]}`,
       `חלקה: ${plots[form.plot]}`,
-      `מספר מיכלים: ${form.containers}`,
+      `כמות קטיף: ${form.containers} מיכלים · ${Math.ceil(form.containers)} מיכלים פיזיים`,
     ].join("\n");
 
     if (!window.confirm(confirmationMessage)) {
@@ -214,7 +217,8 @@ function FarmApp() {
       variety_id: Number(form.variety),
       plot_id: Number(form.plot),
       picker_id: 1,
-      containers: form.containers,
+      containers: Math.ceil(form.containers),
+      harvest_quantity: form.containers,
       container_size: "קטן",
       status: "pending",
     };
@@ -439,7 +443,7 @@ function FarmApp() {
                       </td>
                       <td className="px-2 py-2">{shipment.variety}</td>
                       <td className="break-words px-2 py-2">{shipment.plot}</td>
-                      <td className="px-2 py-2">{shipment.containers}</td>
+                      <td className="px-2 py-2">{shipment.containers}{shipment.containers !== shipment.physicalContainers && <span className="block text-[10px] text-zinc-500">{shipment.physicalContainers} פיזיים</span>}</td>
                       <td className="px-1 py-2 text-center">
                         {paidShipmentIds.has(shipment.id) && <span title="שויך תשלום מאושר לשיווק (מלא או חלקי)" className="text-lg font-bold text-green-700"><span aria-hidden="true">₪</span><span className="sr-only">שויך תשלום מאושר לשיווק (מלא או חלקי)</span></span>}
                       </td>
@@ -518,8 +522,12 @@ function FarmApp() {
                 </select>
 
                 <input
+                  aria-label="מספר מיכלים"
                   type="number"
-                  min="1"
+                  inputMode="decimal"
+                  step="0.01"
+                  min="0.01"
+                  max="1000000"
                   value={form.containers}
                   onChange={(e) =>
                     setForm({
@@ -608,7 +616,7 @@ function FarmApp() {
                         </td>
                         <td className="px-3 py-3">{shipment.variety}</td>
                         <td className="px-3 py-3">{shipment.plot}</td>
-                        <td className="px-3 py-3">{shipment.containers}</td>
+                        <td className="px-3 py-3">{shipment.containers}{shipment.containers !== shipment.physicalContainers && <span className="block text-[10px] text-zinc-500">{shipment.physicalContainers} פיזיים</span>}</td>
                       </tr>
                     ))}
                     {visibleShipments.length === 0 && (

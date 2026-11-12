@@ -9,6 +9,7 @@ type Shipment = {
   plot: string;
   variety: string;
   containers: number;
+  physicalContainers: number;
 };
 
 export default function Dashboard({ shipments, paidWeights, weightsError }: { shipments: Shipment[]; paidWeights: PaidWeight[] | null; weightsError: boolean }) {
@@ -23,19 +24,20 @@ export default function Dashboard({ shipments, paidWeights, weightsError }: { sh
     (!filters.variety || shipment.variety === filters.variety)
   );
   const total = filtered.reduce((sum, shipment) => sum + shipment.containers, 0);
+  const physicalTotal = filtered.reduce((sum, shipment) => sum + shipment.physicalContainers, 0);
   const weightById = new Map(paidWeights?.map((item) => [item.harvest_event_id, item]) || []);
   const paidKg = filtered.reduce((sum, shipment) => sum + (weightById.get(shipment.id)?.net_weight || 0), 0);
   const paidContainers = filtered.reduce((sum, shipment) => sum + (weightById.get(shipment.id)?.containers || 0), 0);
   const weightAvailable = paidWeights !== null && !weightsError;
   const unpaidByVariety = new Map<string, number>();
   for (const shipment of filtered) {
-    const remaining = Math.max(0, shipment.containers - (weightById.get(shipment.id)?.containers || 0));
+    const remaining = Math.max(0, shipment.physicalContainers - (weightById.get(shipment.id)?.containers || 0));
     unpaidByVariety.set(shipment.variety, (unpaidByVariety.get(shipment.variety) || 0) + remaining);
   }
   const unpaidTotal = [...unpaidByVariety.values()].reduce((sum, count) => sum + count, 0);
-  const partialWeight = paidContainers + 0.0005 < total;
+  const partialWeight = paidContainers + 0.0005 < physicalTotal;
   const kgLabel = (value: number) => value.toLocaleString("he-IL", { maximumFractionDigits: 3 });
-  const groups = new Map<string, { plot: string; variety: string; containers: number; kg: number; paidContainers: number }>();
+  const groups = new Map<string, { plot: string; variety: string; containers: number; physicalContainers: number; kg: number; paidContainers: number }>();
   for (const shipment of filtered) {
     const plot = groupBy === "variety" ? "" : shipment.plot;
     const variety = groupBy === "plot" ? "" : shipment.variety;
@@ -43,10 +45,11 @@ export default function Dashboard({ shipments, paidWeights, weightsError }: { sh
     const existing = groups.get(key);
     const paid = weightById.get(shipment.id);
     if (existing) {
-      existing.containers += shipment.containers;
+      existing.containers = Math.round((existing.containers + shipment.containers)*100)/100;
+      existing.physicalContainers += shipment.physicalContainers;
       existing.kg += paid?.net_weight || 0;
       existing.paidContainers += paid?.containers || 0;
-    } else groups.set(key, { plot, variety, containers: shipment.containers, kg: paid?.net_weight || 0, paidContainers: paid?.containers || 0 });
+    } else groups.set(key, { plot, variety, containers: shipment.containers, physicalContainers: shipment.physicalContainers, kg: paid?.net_weight || 0, paidContainers: paid?.containers || 0 });
   }
   const rows = [...groups.entries()].sort(([, a], [, b]) =>
     a.plot.localeCompare(b.plot, "he") || a.variety.localeCompare(b.variety, "he")
@@ -89,27 +92,27 @@ export default function Dashboard({ shipments, paidWeights, weightsError }: { sh
 
       <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 lg:grid-cols-3" aria-live="polite">
         <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-          <h2 className="text-sm text-zinc-500">סה״כ מיכלים</h2>
+          <h2 className="text-sm text-zinc-500">סה״כ מיכלים בקטיף</h2>
           <p className="mt-2 break-words text-3xl font-bold">{invalidRange ? "—" : total.toLocaleString("he-IL")}</p>
-          <p className="mt-1 text-xs text-zinc-500">{filtered.length} שיווקים בסינון הנוכחי</p>
+          <p className="mt-1 text-xs text-zinc-500">{filtered.length} שיווקים בסינון הנוכחי · {physicalTotal.toLocaleString("he-IL")} מיכלים פיזיים</p>
         </div>
         <div className="rounded-2xl border border-zinc-200 bg-white p-4">
           <h2 className="text-sm text-zinc-500">משקל נטו ששולם (ק״ג)</h2>
           {weightAvailable && paidContainers > 0 && !invalidRange
-            ? <><p className="mt-2 break-words text-3xl font-bold">{kgLabel(paidKg)}</p><p className="mt-1 text-xs text-zinc-500">{partialWeight ? "נתון חלקי · " : ""}{kgLabel(paidContainers)} מתוך {kgLabel(total)} מיכלים שולמו</p></>
+            ? <><p className="mt-2 break-words text-3xl font-bold">{kgLabel(paidKg)}</p><p className="mt-1 text-xs text-zinc-500">{partialWeight ? "נתון חלקי · " : ""}{kgLabel(paidContainers)} מתוך {kgLabel(physicalTotal)} מיכלים פיזיים שולמו</p></>
             : <p className="mt-2 text-sm text-zinc-600">{weightsError ? "לא ניתן לטעון את נתוני המשקל" : invalidRange ? "יש לתקן את טווח התאריכים" : !weightAvailable ? "טוען נתוני משקל…" : "נתוני משקל טרם זמינים"}</p>}
         </div>
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
-          <h2 className="text-sm text-amber-900">מיכלים שטרם שולמו</h2>
+          <h2 className="text-sm text-amber-900">מיכלים פיזיים שטרם שולמו</h2>
           <p data-unpaid-total className="mt-2 break-words text-3xl font-bold">{weightAvailable && !invalidRange ? kgLabel(unpaidTotal) : "—"}</p>
           <p className="mt-1 text-xs text-zinc-600">{weightsError ? "לא ניתן לטעון נתוני תשלום" : !weightAvailable ? "טוען נתוני תשלום…" : invalidRange ? "יש לתקן את טווח התאריכים" : "לפי הסינון הנוכחי · לאחר הפחתת שיוכים מאושרים"}</p>
         </div>
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white">
-        <h2 className="p-4 text-lg font-semibold">מיכלים שטרם שולמו לפי זן</h2>
+        <h2 className="p-4 text-lg font-semibold">מיכלים פיזיים שטרם שולמו לפי זן</h2>
         {weightAvailable && !invalidRange ? <table data-unpaid-varieties className="w-full table-fixed text-right text-sm">
-          <thead className="bg-zinc-50"><tr><th scope="col" className="px-4 py-3">זן</th><th scope="col" className="px-4 py-3">מיכלים שטרם שולמו</th></tr></thead>
+          <thead className="bg-zinc-50"><tr><th scope="col" className="px-4 py-3">זן</th><th scope="col" className="px-4 py-3">מיכלים פיזיים שטרם שולמו</th></tr></thead>
           <tbody className="divide-y divide-zinc-100">
             {[...unpaidByVariety].sort(([a], [b]) => a.localeCompare(b, "he")).map(([variety, count]) => <tr key={variety}><td className="px-4 py-3">{variety || "לא ידוע"}</td><td className="px-4 py-3">{kgLabel(count)}</td></tr>)}
             {!unpaidByVariety.size && <tr><td colSpan={2} className="p-4 text-zinc-500">אין שיווקים התואמים לסינון</td></tr>}
@@ -135,7 +138,7 @@ export default function Dashboard({ shipments, paidWeights, weightsError }: { sh
               <tr>
                 {groupBy !== "variety" && <th scope="col" className="px-3 py-3">חלקה</th>}
                 {groupBy !== "plot" && <th scope="col" className="px-3 py-3">זן</th>}
-                <th scope="col" className="px-3 py-3">מיכלים</th>
+                <th scope="col" className="px-3 py-3">מיכלים בקטיף</th>
                 <th scope="col" className="px-3 py-3">נטו ששולם (ק״ג)</th>
               </tr>
             </thead>
@@ -146,7 +149,7 @@ export default function Dashboard({ shipments, paidWeights, weightsError }: { sh
                   {groupBy !== "plot" && <td className="px-3 py-3">{row.variety || "לא ידוע"}</td>}
                   <td className="px-3 py-3">{row.containers.toLocaleString("he-IL")}</td>
                   <td className="px-3 py-3">
-                    {weightAvailable && row.paidContainers > 0 ? <>{kgLabel(row.kg)}{row.paidContainers + 0.0005 < row.containers && <span className="block text-xs text-amber-800">חלקי</span>}</> : <span aria-label="נתוני משקל אינם זמינים">—</span>}
+                    {weightAvailable && row.paidContainers > 0 ? <>{kgLabel(row.kg)}{row.paidContainers + 0.0005 < row.physicalContainers && <span className="block text-xs text-amber-800">חלקי</span>}</> : <span aria-label="נתוני משקל אינם זמינים">—</span>}
                   </td>
                 </tr>
               ))}

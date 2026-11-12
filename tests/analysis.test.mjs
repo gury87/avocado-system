@@ -37,3 +37,16 @@ test("Loss lines preserve each selected shipment date and signed calendar-day ga
   assert.deepEqual(lossReport(data,rows)[0].shipments,[{id:"1",date:"2026-10-25",days:1},{id:"2",date:"2026-10-27",days:-1}]);
   assert.equal(lossReport(data,[rows[1]])[0].shipments.length,1,"Dates respect the report filters");
 });
+
+test("Yield uses reported harvest but partial payment and tare use physical count",()=>{
+  const shipment={id:"fraction",plot_id:"1",containers:2,harvest_quantity:1.25};
+  const row={shipment,paid:1,kg:100,revenue:30000};
+  const plots=[{id:"1",name:"Plot",dunam:10}];
+  const [partial]=yieldByPlot([row],plots);
+  assert.equal(partial.containers,1.25);assert.equal(partial.containersPerDunam,0.125);
+  assert.equal(partial.physicalContainers,2);assert.equal(partial.partial,true);
+  assert.equal(yieldByPlot([{...row,paid:2}],plots)[0].partial,false);
+  const weight=weightBreakdown({gross_weight:"1000",containers:"2",tare_weight:"40",net_weight:"901.6"});
+  assert.equal(weight.tare,80);assert.ok(Math.abs(weight.loss-18.4)<1e-9);
+  assert.ok(Math.abs(weight.percent-2)<1e-9);
+});

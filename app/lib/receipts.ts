@@ -16,7 +16,7 @@ export type Receipt = {
 };
 export type MatchShipment = {
   id: string; trader_id: string; variety_id: string; plot_id: string;
-  harvest_date: string; containers: number; used_containers: number;
+  harvest_date: string; harvest_quantity?: number; containers: number; used_containers: number;
 };
 export type ReceiptWorkspace = {
   traders: { id: string; name: string }[];
