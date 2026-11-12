@@ -71,6 +71,8 @@ test('Storage paths and API authorization handle secret keys without turning the
 
 test('Child failures never echo a database password or arbitrary tool stderr',async()=>{
   await assert.rejects(command(process.execPath,['-e',"process.stderr.write('password=DO_NOT_LOG');process.exit(1)"],{label:'Test client'}),e=>e.message.includes('Test client failed')&&!e.message.includes('DO_NOT_LOG'));
+  await assert.rejects(command(process.execPath,['-e',"process.stderr.write('pg_restore: error: FATAL: unsupported startup parameter: options');process.exit(1)"],{label:'pg_restore'}),/unsupported startup parameter/);
+  await assert.rejects(command(process.execPath,['-e',"process.stderr.write(\"ERROR: invalid input syntax: 'PRIVATE_DATA' DO_NOT_LOG\\nDETAIL: extra secret\");process.exit(1)"],{label:'pg_restore',env:{...process.env,RESTORE_DB_PASSWORD:'DO_NOT_LOG'}}),e=>!e.message.includes('PRIVATE_DATA')&&!e.message.includes('DO_NOT_LOG')&&!e.message.includes('extra secret'));
 });
 
 test('Cloud test restore refuses unconfirmed runs and unsafe/unverified backup selection',async()=>{

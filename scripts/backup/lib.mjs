@@ -72,8 +72,12 @@ export async function command(program, args, { env = process.env, input, cwd, la
         const text=chunk.toString('utf8');
         // Whitelisted metadata-only diagnostics, never COPY rows, SQL statements,
         // connection URLs, passwords, request headers or database error DETAIL.
-        const match=text.match(/ERROR:\s*((?:permission denied for|must be owner of) (?:schema|table|function|sequence|parameter|relation|type|extension) [A-Za-z_][A-Za-z0-9_.]*|(?:schema|relation|role|type|column) "[A-Za-z_][A-Za-z0-9_.]*" (?:already exists|does not exist)|unrecognized configuration parameter "[A-Za-z_][A-Za-z0-9_]*")/);
-        if(match) databaseHint=match[1];
+        const match=text.match(/(?:ERROR|FATAL):\s*((?:permission denied|must be owner|unsupported startup parameter|invalid startup parameter|unrecognized configuration parameter|schema |relation |role |type |column |function |extension |could not access file|syntax error|cannot |invalid input syntax|duplicate key|insert or update|no pg_hba.conf|password authentication failed|Tenant or user not found|remaining connection slots|new row)[^\r\n]*)/);
+        if(match) {
+          let hint=match[1].replace(/'[^']*'/g,"'<redacted>'");
+          for(const [name,value] of Object.entries(env)) if(value && /PASSWORD|SECRET|TOKEN|ENCRYPTION_KEY/.test(name)) hint=hint.replaceAll(value,'<redacted>');
+          databaseHint=hint.slice(0,220);
+        }
       }
     });
     child.on('error', () => { clearTimeout(timer); reject(new Error(`${label} could not start.`)); });

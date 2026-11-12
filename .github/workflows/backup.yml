@@ -13,13 +13,6 @@ on:
         options:
           - manual
           - before-migration
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/backup.yml'
-      - 'scripts/backup/**'
-      - 'tests/backup.test.mjs'
-
 permissions:
   contents: read
 
