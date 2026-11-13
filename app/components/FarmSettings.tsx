@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "./AuthGate";
 import { useCatalog } from "./FarmCatalog";
+import BackupManagement from "./BackupManagement";
 import type { CatalogEntry, CatalogKind } from "../lib/catalog";
 
 const inputClass = "mt-1 min-h-11 w-full min-w-0 rounded-lg border border-zinc-300 bg-white p-2 text-base";
@@ -37,6 +38,7 @@ export default function FarmSettings({ onDirtyChange }: { onDirtyChange: (dirty:
   return <section className="space-y-4 text-zinc-900">
     <h2 className="text-2xl font-bold">הגדרות המשק</h2>
     <p className="text-sm text-zinc-600">ניהול למנהל בלבד. הוצאה משימוש מסתירה רשומה מבחירה חדשה ושומרת את ההיסטוריה.</p>
+    <BackupManagement />
     {message && <p role="status" className="rounded-xl bg-white p-3">{message}</p>}
     <button type="button" disabled={busy} className="min-h-11 underline" onClick={async () => { if (!canLeave()) return; setEntry(null); if (await refresh()) { setMessage("הנתונים רועננו."); setDirty(false);onDirtyChange(false); } }}>רענון הגדרות</button>
     <form className="rounded-xl border border-zinc-200 bg-white p-4" onSubmit={async (event) => {

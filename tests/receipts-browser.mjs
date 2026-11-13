@@ -81,9 +81,22 @@ try {
   let documents = [];
   const storedFiles = new Set();
   let photoFixture = "";
+  let backupDispatches = 0;
+  let backupLoadFails = false;
   handlers.set("Fetch.requestPaused", [(event) => {
     void (async () => {
       const url = new URL(event.request.url);
+      if (url.origin === origin && url.pathname === "/api/backups") {
+        assert.equal(role, "admin");
+        const post = event.request.method === "POST";
+        if (post) backupDispatches++;
+        const success = { id: 10, number: 10, attempt: 1, status: "completed", conclusion: "success", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), event: "schedule", url: "https://github.com/gury87/avocado-system/actions/runs/10" };
+        const latest = { ...success, id: 11, number: 11, conclusion: "failure" };
+        const response = backupLoadFails ? { error: "שירות הגיבוי אינו זמין כרגע" } : post ? { accepted: true } : { runs: backupDispatches ? [{ ...latest, status: "queued", conclusion: null }, success] : [latest, success], lastSuccess: success, canStart: true, active: backupDispatches > 0, checkedAt: new Date().toISOString() };
+        await page("Fetch.fulfillRequest", { requestId: event.requestId, responseCode: backupLoadFails ? 502 : post ? 202 : 200,
+          responseHeaders: [{ name: "Content-Type", value: "application/json" }], body: Buffer.from(JSON.stringify(response)).toString("base64") });
+        return;
+      }
       if (url.origin === origin) { await page("Fetch.continueRequest", { requestId: event.requestId }); return; }
       requests.push(`${event.request.method} ${url.pathname}`);
       if (url.host !== host) throw new Error(`Unexpected external test request to ${url.hostname}`);
@@ -429,6 +442,16 @@ try {
   }
 
   await click("הגדרות");await waitText("הגדרות המשק");
+  await waitText("גיבוי מוצלח אחרון");await waitText("הניסיון האחרון לא הושלם בהצלחה");
+  backupLoadFails=true;await click("רענון גיבויים");await waitText("שירות הגיבוי אינו זמין כרגע");
+  assert.equal(await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='גיבוי עכשיו').disabled"),true);
+  backupLoadFails=false;await click("רענון גיבויים");await waitFor(()=>evaluate("!document.querySelector('[role=alert]')"),"backup history refreshed");
+  await click("גיבוי עכשיו");await waitText("הבקשה לגיבוי התקבלה");await waitText("ממתין להופעת הריצה");
+  assert.equal(backupDispatches,1);
+  assert.equal(await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.includes('ממתין להופעת הריצה')).disabled"),true);
+  await page("Emulation.setDeviceMetricsOverride",{width:320,height:800,deviceScaleFactor:1,mobile:true});
+  await screenshot("backups-mobile-320.png");
+  assert.equal(await evaluate("document.documentElement.scrollWidth<=window.innerWidth"),true,"Backup controls fit a narrow screen");
   assert.equal(await evaluate("[...document.querySelectorAll('label')].find(l=>l.textContent.startsWith('סימון שיווק פתוח'))?.querySelector('input').value"),"14");
   await fill("סימון שיווק פתוח", "30");await fill("סף סימון פחת", "2");await fill("עלות קטיף למיכל קטן","175");await fill("עלות קטיף למיכל גדול","210");
   acceptDialog=false;await click("שיווקים");acceptDialog=true;

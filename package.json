@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test:auth": "node --test tests/auth-permissions.test.mjs",
     "test:backup": "node --test tests/backup.test.mjs",
+    "test:backup-site": "node --test tests/backup-site.test.mjs",
     "test:preview": "node --test tests/preview.test.mjs",
     "preview:restore": "node scripts/backup/preview.mjs",
     "test:reports": "node --experimental-strip-types --test tests/reports.test.mjs",
