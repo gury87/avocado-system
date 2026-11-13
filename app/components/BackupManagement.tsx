@@ -57,7 +57,7 @@ export default function BackupManagement() {
         {stale && <span className="block font-semibold">עברו יותר מ־48 שעות מהגיבוי המוצלח האחרון.</span>}
       </p>
       {data.runs[0]?.status === "completed" && data.runs[0].conclusion !== "success" && <p className="text-sm font-semibold text-red-800">הניסיון האחרון לא הושלם בהצלחה. הגיבוי המוצלח הקודם עדיין מופיע למעלה.</p>}
-      {!data.canStart && <p className="text-sm text-amber-900">הפעלת גיבוי מהאתר עדיין לא זמינה. נדרשת הגדרת חיבור בשרת הייצור.</p>}
+      {!data.canStart && <p role="status" className="text-sm text-amber-900">{data.configurationMessage || "הפעלת גיבוי מהאתר עדיין לא זמינה. נדרשת הגדרת חיבור בשרת הייצור."}</p>}
     </>}
     <div className="flex flex-wrap gap-2">
       <button type="button" disabled={!data?.canStart || !!data.active || starting || pending || !!error || loading} className="min-h-11 rounded-lg bg-zinc-900 px-4 text-white disabled:opacity-50" onClick={async () => {

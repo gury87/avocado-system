@@ -5,4 +5,5 @@ export type BackupRun = {
 export type BackupOverview = {
   runs: BackupRun[]; lastSuccess: BackupRun | null; canStart: boolean; active: boolean;
   checkedAt: string;
+  configurationMessage: string | null;
 };

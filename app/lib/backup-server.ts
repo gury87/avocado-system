@@ -3,13 +3,21 @@ import type { BackupOverview, BackupRun } from "./backup-types";
 
 const base = "https://api.github.com/repos/gury87/avocado-system/actions/workflows/backup.yml";
 const active = (run: BackupRun) => run.status !== "completed";
-export function backupCanStart() {
-  const ref = process.env.BACKUP_SITE_PROJECT_REF;
-  return process.env.VERCEL_ENV === "production" && !!process.env.BACKUP_GITHUB_TOKEN &&
-    !!ref && /^[a-z0-9]+$/.test(ref) && process.env.NEXT_PUBLIC_SUPABASE_URL === `https://${ref}.supabase.co`;
+export function backupConfigurationMessage(): string | null {
+  if (process.env.VERCEL_ENV !== "production") return "השרת אינו מזוהה כסביבת Production. פתח את כתובת האתר הפעיל. אם זו כתובת הייצור, בדוק ב־Vercel שהאפשרות Automatically expose System Environment Variables מופעלת ובצע Redeploy ל־Production.";
+  if (!process.env.BACKUP_GITHUB_TOKEN?.trim()) return "המשתנה BACKUP_GITHUB_TOKEN חסר בפריסה הנוכחית. ודא שנשמר בפרויקט האתר בסביבת Production ובצע Redeploy לאחר השמירה.";
+  const ref = process.env.BACKUP_SITE_PROJECT_REF?.trim();
+  if (!ref) return "המשתנה BACKUP_SITE_PROJECT_REF חסר בפריסה הנוכחית. שמור אותו בסביבת Production ובצע Redeploy.";
+  if (!/^[a-z0-9]+$/.test(ref)) return "BACKUP_SITE_PROJECT_REF צריך להכיל רק את מזהה פרויקט Supabase המקורי, בלי https:// ובלי .supabase.co.";
+  try {
+    const url = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || "");
+    if (url.origin === `https://${ref}.supabase.co` && url.pathname === "/" && !url.username && !url.password && !url.search && !url.hash) return null;
+  } catch { /* Return a configuration message without exposing variable values. */ }
+  return "מזהה הפרויקט ב־BACKUP_SITE_PROJECT_REF אינו תואם לכתובת Supabase של האתר. בדוק את מזהה פרויקט המקור ובצע Redeploy לאחר התיקון.";
 }
+export function backupCanStart() { return backupConfigurationMessage() === null; }
 async function github(path: string, method = "GET") {
-  const token = process.env.VERCEL_ENV === "production" ? process.env.BACKUP_GITHUB_TOKEN : undefined;
+  const token = process.env.VERCEL_ENV === "production" ? process.env.BACKUP_GITHUB_TOKEN?.trim() : undefined;
   let response: Response;
   try {
     response = await fetch(base + path, {
@@ -40,7 +48,7 @@ export async function backupOverview(): Promise<BackupOverview> {
   ]);
   const runs: BackupRun[] = recent.workflow_runs.map(run);
   return { runs: runs.slice(0, 10), lastSuccess: success.workflow_runs[0] ? run(success.workflow_runs[0]) : null,
-    canStart: backupCanStart(), active: runs.some(active), checkedAt: new Date().toISOString() };
+    canStart: backupCanStart(), configurationMessage: backupConfigurationMessage(), active: runs.some(active), checkedAt: new Date().toISOString() };
 }
 export async function startBackup() {
   if (!backupCanStart()) throw new Error("BACKUP_CONFIG");

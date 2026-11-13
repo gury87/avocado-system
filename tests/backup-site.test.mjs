@@ -84,7 +84,19 @@ test('Manual backups are disabled in preview, missing configuration and a differ
   for (const changes of [{ VERCEL_ENV: 'preview' }, { BACKUP_GITHUB_TOKEN: '' }, { BACKUP_SITE_PROJECT_REF: '' }, { NEXT_PUBLIC_SUPABASE_URL: 'https://testref.supabase.co' }]) {
     const service = await load('app/lib/backup-server.ts', { env: { ...env, ...changes } });
     assert.equal(service.backupCanStart(), false);
+    assert.ok(service.backupConfigurationMessage());
+    assert.ok(!service.backupConfigurationMessage().includes('fake-server-token'));
     await assert.rejects(service.startBackup(), /BACKUP_CONFIG/);
+  }
+});
+
+test('Configuration accepts surrounding whitespace and a trailing URL slash but keeps the project guard', async () => {
+  const service = await load('app/lib/backup-server.ts', { env: { ...env, BACKUP_SITE_PROJECT_REF: ' productionref\n', NEXT_PUBLIC_SUPABASE_URL: ' https://productionref.supabase.co/ ' } });
+  assert.equal(service.backupCanStart(), true);
+  assert.equal(service.backupConfigurationMessage(), null);
+  for (const url of ['https://productionref.supabase.co/other', 'https://productionref.supabase.co?x=1', 'https://productionref.supabase.co.evil.invalid']) {
+    const unsafe = await load('app/lib/backup-server.ts', { env: { ...env, NEXT_PUBLIC_SUPABASE_URL: url } });
+    assert.equal(unsafe.backupCanStart(), false);
   }
 });
 
