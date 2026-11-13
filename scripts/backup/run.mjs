@@ -111,7 +111,7 @@ async function main() {
   stage='recovery tools';
   console.log('Saving standalone recovery tools...');
   const toolsDir=path.join(root,'recovery-tools');await mkdir(toolsDir,{mode:0o700});
-  const recoveryFiles=[['scripts/backup/lib.mjs','lib.mjs'],['scripts/backup/recover.mjs','recover.mjs'],['scripts/backup/restore-db.mjs','restore-db.mjs'],['BACKUP_SETUP.md','BACKUP_SETUP.md']];
+  const recoveryFiles=[['scripts/backup/lib.mjs','lib.mjs'],['scripts/backup/recover.mjs','recover.mjs'],['scripts/backup/restore-db.mjs','restore-db.mjs'],['scripts/backup/preview.mjs','preview.mjs'],['scripts/backup/preview-start.mjs','preview-start.mjs'],['BACKUP_SETUP.md','BACKUP_SETUP.md']];
   for(const [source,file] of recoveryFiles) {
     await writeFile(path.join(toolsDir,file),await readFile(source));
   }

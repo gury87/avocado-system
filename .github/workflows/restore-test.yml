@@ -42,7 +42,7 @@ jobs:
         with:
           node-version: '22'
       - name: Test encryption and restore guards
-        run: node --test tests/backup.test.mjs
+        run: node --test tests/backup.test.mjs tests/preview.test.mjs
       - name: Prepare database and OneDrive tools
         run: |
           docker pull postgres:18
